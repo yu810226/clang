@@ -432,6 +432,7 @@ TEST_F(FormatTest, FormatsSwitchStatement) {
                "  // Do nothing.\n"
                "}");
   verifyFormat("switch (x) {\n"
+               "// comment\n"
                "// if 1, do f()\n"
                "case 1:\n"
                "  f();\n"
@@ -1337,6 +1338,115 @@ TEST_F(FormatTest, MacroDefinitionsWithIncompleteCode) {
   verifyFormat("#define A template <typename T>");
   verifyFormat("#define STR(x) #x\n"
                "f(STR(this_is_a_string_literal{));");
+}
+
+TEST_F(FormatTest, MacroCallsWithoutTrailingSemicolon) {
+  EXPECT_EQ("INITIALIZE_PASS_BEGIN(ScopDetection, \"polly-detect\")\n"
+            "INITIALIZE_AG_DEPENDENCY(AliasAnalysis)\n"
+            "INITIALIZE_PASS_DEPENDENCY(DominatorTree)\n"
+            "class X {\n"
+            "};\n"
+            "INITIALIZE_PASS_END(ScopDetection, \"polly-detect\")\n"
+            "int *createScopDetectionPass() { return 0; }",
+            format("  INITIALIZE_PASS_BEGIN(ScopDetection, \"polly-detect\")\n"
+                   "  INITIALIZE_AG_DEPENDENCY(AliasAnalysis)\n"
+                   "  INITIALIZE_PASS_DEPENDENCY(DominatorTree)\n"
+                   "  class X {};\n"
+                   "  INITIALIZE_PASS_END(ScopDetection, \"polly-detect\")\n"
+                   "  int *createScopDetectionPass() { return 0; }"));
+  // FIXME: We could probably treat IPC_BEGIN_MESSAGE_MAP/IPC_END_MESSAGE_MAP as
+  // braces, so that inner block is indented one level more.
+  EXPECT_EQ("int q() {\n"
+            "  IPC_BEGIN_MESSAGE_MAP(WebKitTestController, message)\n"
+            "  IPC_MESSAGE_HANDLER(xxx, qqq)\n"
+            "  IPC_END_MESSAGE_MAP()\n"
+            "}",
+            format("int q() {\n"
+                   "  IPC_BEGIN_MESSAGE_MAP(WebKitTestController, message)\n"
+                   "    IPC_MESSAGE_HANDLER(xxx, qqq)\n"
+                   "  IPC_END_MESSAGE_MAP()\n"
+                   "}"));
+  EXPECT_EQ("int q() {\n"
+            "  f(x);\n"
+            "  f(x) {}\n"
+            "  f(x)->g();\n"
+            "  f(x)->*g();\n"
+            "  f(x).g();\n"
+            "  f(x) = x;\n"
+            "  f(x) += x;\n"
+            "  f(x) -= x;\n"
+            "  f(x) *= x;\n"
+            "  f(x) /= x;\n"
+            "  f(x) %= x;\n"
+            "  f(x) &= x;\n"
+            "  f(x) |= x;\n"
+            "  f(x) ^= x;\n"
+            "  f(x) >>= x;\n"
+            "  f(x) <<= x;\n"
+            "  f(x)[y].z();\n"
+            "  LOG(INFO) << x;\n"
+            "  ifstream(x) >> x;\n"
+            "}\n",
+            format("int q() {\n"
+                   "  f(x)\n;\n"
+                   "  f(x)\n {}\n"
+                   "  f(x)\n->g();\n"
+                   "  f(x)\n->*g();\n"
+                   "  f(x)\n.g();\n"
+                   "  f(x)\n = x;\n"
+                   "  f(x)\n += x;\n"
+                   "  f(x)\n -= x;\n"
+                   "  f(x)\n *= x;\n"
+                   "  f(x)\n /= x;\n"
+                   "  f(x)\n %= x;\n"
+                   "  f(x)\n &= x;\n"
+                   "  f(x)\n |= x;\n"
+                   "  f(x)\n ^= x;\n"
+                   "  f(x)\n >>= x;\n"
+                   "  f(x)\n <<= x;\n"
+                   "  f(x)\n[y].z();\n"
+                   "  LOG(INFO)\n << x;\n"
+                   "  ifstream(x)\n >> x;\n"
+                   "}\n"));
+  EXPECT_EQ("int q() {\n"
+            "  f(x)\n"
+            "  if (1) {\n"
+            "  }\n"
+            "  f(x)\n"
+            "  while (1) {\n"
+            "  }\n"
+            "  f(x)\n"
+            "  g(x);\n"
+            "  f(x)\n"
+            "  try {\n"
+            "    q();\n"
+            "  }\n"
+            "  catch (...) {\n"
+            "  }\n"
+            "}\n",
+            format("int q() {\n"
+                   "f(x)\n"
+                   "if (1) {}\n"
+                   "f(x)\n"
+                   "while (1) {}\n"
+                   "f(x)\n"
+                   "g(x);\n"
+                   "f(x)\n"
+                   "try { q(); } catch (...) {}\n"
+                   "}\n"));
+  EXPECT_EQ("class A {\n"
+            "  A() : t(0) {}\n"
+            "  A(X x)\n" // FIXME: function-level try blocks are broken.
+            "  try : t(0) {\n"
+            "  }\n"
+            "  catch (...) {\n"
+            "  }\n"
+            "};",
+            format("class A {\n"
+                   "  A()\n : t(0) {}\n"
+                   "  A(X x)\n"
+                   "  try : t(0) {} catch (...) {}\n"
+                   "};"));
 }
 
 TEST_F(FormatTest, IndentPreprocessorDirectivesAtZero) {
