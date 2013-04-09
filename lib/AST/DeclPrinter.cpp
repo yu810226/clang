@@ -24,7 +24,7 @@
 #include "llvm/Support/raw_ostream.h"
 using namespace clang;
 
-namespace {
+namespace clang {
   class DeclPrinter : public DeclVisitor<DeclPrinter> {
     raw_ostream &Out;
     PrintingPolicy Policy;
