@@ -4026,7 +4026,7 @@ struct DOTGraphTraits<const CFG*> : public DefaultDOTGraphTraits {
 
   DOTGraphTraits (bool isSimple=false) : DefaultDOTGraphTraits(isSimple) {}
 
-  static std::string getNodeLabel(const CFGBlock *Node, const CFG* Graph) {
+  static std::string getNodeLabel(const CFGBlock *Node, const CFG *Graph) {
 
 #ifndef NDEBUG
     std::string OutSStr;
@@ -4047,6 +4047,17 @@ struct DOTGraphTraits<const CFG*> : public DefaultDOTGraphTraits {
 #else
     return "";
 #endif
+  }
+
+  static std::string getNodeAttributes(const CFGBlock *Node, const CFG *Graph) {
+#ifndef NDEBUG
+    // Decorate the entry and exit nodes in a special way:
+    if (Node == &Graph->getEntry())
+      return "style = filled, fillcolor = green";
+    else if (Node == &Graph->getExit())
+      return "style = filled, fillcolor = orange";
+#endif
+    return "";
   }
 
   /// If you want to override the dot attributes printed for a particular edge,
