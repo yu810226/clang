@@ -193,6 +193,10 @@ LANGOPT(CUDAHostDeviceConstexpr, 1, 1, "treating unattributed constexpr function
 LANGOPT(CUDADeviceFlushDenormalsToZero, 1, 0, "flushing denormals to zero")
 LANGOPT(CUDADeviceApproxTranscendentals, 1, 0, "using approximate transcendental functions")
 
+LANGOPT(SYCL              , 1, 0, "SYCL support")
+LANGOPT(SYCLIsDevice      , 1, 0, "Generate code only for SYCL device")
+LANGOPT(SYCLPrintKernelAST, 1, 0, "Print the AST related to the SYCL kernel part")
+
 LANGOPT(SizedDeallocation , 1, 0, "enable sized deallocation functions")
 LANGOPT(ConceptsTS , 1, 0, "enable C++ Extensions for Concepts")
 BENIGN_LANGOPT(ElideConstructors , 1, 1, "C++ copy constructor elision")
