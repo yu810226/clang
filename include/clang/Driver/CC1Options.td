@@ -799,6 +799,18 @@ def fno_cuda_host_device_constexpr : Flag<["-"], "fno-cuda-host-device-constexpr
   HelpText<"Don't treat unattributed constexpr functions as __host__ __device__.">;
 
 //===----------------------------------------------------------------------===//
+// SYCL Options
+//===----------------------------------------------------------------------===//
+
+def sycl : Flag<["-"], "sycl">,
+  HelpText<"Compile SYCL program on the host">;
+def sycl_is_device : Flag<["-"], "sycl-is-device">,
+  HelpText<"Compile SYCL program for the target device">;
+// Look at ast-dump-filter too
+def sycl_print_kernel_ast : Flag<["-"], "sycl-print-kernel-ast">,
+  HelpText<"Build AST and then pretty-print the kernel related part.">;
+
+//===----------------------------------------------------------------------===//
 // OpenMP Options
 //===----------------------------------------------------------------------===//
 

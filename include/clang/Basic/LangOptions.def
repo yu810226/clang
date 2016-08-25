@@ -205,10 +205,15 @@ LANGOPT(CUDAHostDeviceConstexpr, 1, 1, "treating unattributed constexpr function
 LANGOPT(CUDADeviceFlushDenormalsToZero, 1, 0, "flushing denormals to zero")
 LANGOPT(CUDADeviceApproxTranscendentals, 1, 0, "using approximate transcendental functions")
 
+LANGOPT(SYCL              , 1, 0, "SYCL support")
+LANGOPT(SYCLIsDevice      , 1, 0, "Generate code only for SYCL device")
+LANGOPT(SYCLPrintKernelAST, 1, 0, "Print the AST related to the SYCL kernel part")
+
 LANGOPT(SizedDeallocation , 1, 0, "sized deallocation")
 LANGOPT(AlignedAllocation , 1, 0, "aligned allocation")
 LANGOPT(AlignedAllocationUnavailable, 1, 0, "aligned allocation functions are unavailable")
 LANGOPT(NewAlignOverride  , 32, 0, "maximum alignment guaranteed by '::operator new(size_t)'")
+
 LANGOPT(ConceptsTS , 1, 0, "enable C++ Extensions for Concepts")
 BENIGN_LANGOPT(ModulesCodegen , 1, 0, "Modules code generation")
 BENIGN_LANGOPT(ModulesDebugInfo , 1, 0, "Modules debug info")
