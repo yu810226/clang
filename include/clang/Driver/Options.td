@@ -124,6 +124,7 @@ def pedantic_Group : OptionGroup<"<pedantic group>">, Group<f_Group>,
                      DocFlatten;
 def opencl_Group : OptionGroup<"<opencl group>">, Group<f_Group>,
                    DocName<"OpenCL flags">;
+def sycl_Group   : OptionGroup<"<sycl group>">, Group<CompileOnly_Group>;
 
 def m_Group : OptionGroup<"<m group>">, Group<CompileOnly_Group>,
               DocName<"Target-dependent compilation options">;
@@ -518,6 +519,21 @@ def cl_denorms_are_zero : Flag<["-"], "cl-denorms-are-zero">, Group<opencl_Group
   HelpText<"OpenCL only. Allow denormals to be flushed to zero.">;
 def cl_fp32_correctly_rounded_divide_sqrt : Flag<["-"], "cl-fp32-correctly-rounded-divide-sqrt">, Group<opencl_Group>, Flags<[CC1Option]>,
   HelpText<"OpenCL only. Specify that single precision floating-point divide and sqrt used in the program source are correctly rounded.">;
+
+//===----------------------------------------------------------------------===//
+// SYCL Options
+//===----------------------------------------------------------------------===//
+
+def sycl : Flag<["-"], "sycl">, Group<opencl_Group>, Flags<[CC1Option]>,
+  HelpText<"Compile SYCL program on the host">;
+def sycl_is_device : Flag<["-"], "sycl-is-device">,
+  Group<opencl_Group>, Flags<[CC1Option]>,
+  HelpText<"Compile SYCL program for the target device">;
+// Look at ast-dump-filter too
+def sycl_print_kernel_ast : Flag<["-"], "sycl-print-kernel-ast">,
+  Group<opencl_Group>, Flags<[CC1Option]>,
+  HelpText<"Build AST and then pretty-print the kernel related part.">;
+
 def client__name : JoinedOrSeparate<["-"], "client_name">;
 def combine : Flag<["-", "--"], "combine">, Flags<[DriverOption, Unsupported]>;
 def compatibility__version : JoinedOrSeparate<["-"], "compatibility_version">;
