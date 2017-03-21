@@ -241,6 +241,7 @@ PUNCTUATOR(caretcaret,            "^^")
 //               MSVC <= v18.
 //   KEYOPENCL  - This is a keyword in OpenCL
 //   KEYNOOPENCL  - This is a keyword that is not supported in OpenCL
+//   KEYSYCL    - This is a keyword in SYCL
 //   KEYALTIVEC - This is a keyword in AltiVec
 //   KEYZVECTOR - This is a keyword for the System z vector extensions,
 //                which are heavily based on AltiVec
@@ -499,28 +500,28 @@ KEYWORD(__unaligned                 , KEYMS)
 KEYWORD(__super                     , KEYMS)
 
 // OpenCL address space qualifiers
-KEYWORD(__global                    , KEYOPENCL)
-KEYWORD(__local                     , KEYOPENCL)
-KEYWORD(__constant                  , KEYOPENCL)
-KEYWORD(__private                   , KEYOPENCL)
-KEYWORD(__generic                   , KEYOPENCL)
+KEYWORD(__global                    , KEYOPENCL|KEYSYCL)
+KEYWORD(__local                     , KEYOPENCL|KEYSYCL)
+KEYWORD(__constant                  , KEYOPENCL|KEYSYCL)
+KEYWORD(__private                   , KEYOPENCL|KEYSYCL)
+KEYWORD(__generic                   , KEYOPENCL|KEYSYCL)
 ALIAS("global", __global            , KEYOPENCL)
 ALIAS("local", __local              , KEYOPENCL)
 ALIAS("constant", __constant        , KEYOPENCL)
 ALIAS("private", __private          , KEYOPENCL)
 ALIAS("generic", __generic          , KEYOPENCL)
 // OpenCL function qualifiers
-KEYWORD(__kernel                    , KEYOPENCL)
+KEYWORD(__kernel                    , KEYOPENCL|KEYSYCL)
 ALIAS("kernel", __kernel            , KEYOPENCL)
 // OpenCL access qualifiers
-KEYWORD(__read_only                 , KEYOPENCL)
-KEYWORD(__write_only                , KEYOPENCL)
-KEYWORD(__read_write                , KEYOPENCL)
+KEYWORD(__read_only                 , KEYOPENCL|KEYSYCL)
+KEYWORD(__write_only                , KEYOPENCL|KEYSYCL)
+KEYWORD(__read_write                , KEYOPENCL|KEYSYCL)
 ALIAS("read_only", __read_only      , KEYOPENCL)
 ALIAS("write_only", __write_only    , KEYOPENCL)
 ALIAS("read_write", __read_write    , KEYOPENCL)
 // OpenCL builtins
-KEYWORD(__builtin_astype            , KEYOPENCL)
+KEYWORD(__builtin_astype            , KEYOPENCL|KEYSYCL)
 KEYWORD(vec_step                    , KEYOPENCL|KEYALTIVEC|KEYZVECTOR)
 #define GENERIC_IMAGE_TYPE(ImgType, Id) KEYWORD(ImgType##_t, KEYOPENCL)
 #include "clang/Basic/OpenCLImageTypes.def"
