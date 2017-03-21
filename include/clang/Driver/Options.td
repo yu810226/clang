@@ -79,6 +79,7 @@ def i_Group               : OptionGroup<"<i group>">, Group<CompileOnly_Group>;
 def clang_i_Group         : OptionGroup<"<clang i group>">, Group<i_Group>;
 def m_Group               : OptionGroup<"<m group>">, Group<CompileOnly_Group>;
 def opencl_Group          : OptionGroup<"<opencl group>">, Group<CompileOnly_Group>;
+def sycl_Group          : OptionGroup<"<sycl group>">, Group<CompileOnly_Group>;
 
 // Feature groups - these take command line options that correspond directly to
 // target specific features and can be translated directly from command line
@@ -389,6 +390,21 @@ def cl_std_EQ : Joined<["-"], "cl-std=">, Group<opencl_Group>, Flags<[CC1Option]
   HelpText<"OpenCL language standard to compile for.">;
 def cl_denorms_are_zero : Flag<["-"], "cl-denorms-are-zero">, Group<opencl_Group>, Flags<[CC1Option]>,
   HelpText<"OpenCL only. Allow denormals to be flushed to zero.">;
+
+//===----------------------------------------------------------------------===//
+// SYCL Options
+//===----------------------------------------------------------------------===//
+
+def sycl : Flag<["-"], "sycl">, Group<opencl_Group>, Flags<[CC1Option]>,
+  HelpText<"Compile SYCL program on the host">;
+def sycl_is_device : Flag<["-"], "sycl-is-device">,
+  Group<opencl_Group>, Flags<[CC1Option]>,
+  HelpText<"Compile SYCL program for the target device">;
+// Look at ast-dump-filter too
+def sycl_print_kernel_ast : Flag<["-"], "sycl-print-kernel-ast">,
+  Group<opencl_Group>, Flags<[CC1Option]>,
+  HelpText<"Build AST and then pretty-print the kernel related part.">;
+
 def client__name : JoinedOrSeparate<["-"], "client_name">;
 def combine : Flag<["-", "--"], "combine">, Flags<[DriverOption, Unsupported]>;
 def compatibility__version : JoinedOrSeparate<["-"], "compatibility_version">;

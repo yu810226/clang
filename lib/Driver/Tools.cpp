@@ -5240,6 +5240,17 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-cl-denorms-are-zero");
   }
 
+  // Forward SYCL options to CC1:
+  if (Args.getLastArg(options::OPT_sycl)) {
+    CmdArgs.push_back("-sycl");
+  }
+  if (Args.getLastArg(options::OPT_sycl_is_device)) {
+    CmdArgs.push_back("-sycl-is-device");
+  }
+  if (Args.getLastArg(options::OPT_sycl_print_kernel_ast)) {
+    CmdArgs.push_back("-sycl-print-kernel-ast");
+  }
+
   // Forward -f options with positive and negative forms; we translate
   // these by hand.
   if (Arg *A = Args.getLastArg(options::OPT_fprofile_sample_use_EQ)) {
