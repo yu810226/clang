@@ -38,10 +38,10 @@ class LLVM_LIBRARY_VISIBILITY SPIRTargetInfo : public TargetInfo {
 public:
   SPIRTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
-    assert(getTriple().getOS() == llvm::Triple::UnknownOS &&
-           "SPIR target must use unknown OS");
-    assert(getTriple().getEnvironment() == llvm::Triple::UnknownEnvironment &&
-           "SPIR target must use unknown environment type");
+    // SYCL experiment: assert(getTriple().getOS() == llvm::Triple::UnknownOS &&
+    // SYCL experiment:        "SPIR target must use unknown OS");
+    // SYCL experiment: assert(getTriple().getEnvironment() == llvm::Triple::UnknownEnvironment &&
+    // SYCL experiment:        "SPIR target must use unknown environment type");
     TLSSupported = false;
     VLASupported = false;
     LongWidth = LongAlign = 64;

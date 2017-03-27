@@ -551,17 +551,22 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
     }
 
   case llvm::Triple::spir: {
-    if (Triple.getOS() != llvm::Triple::UnknownOS ||
-        Triple.getEnvironment() != llvm::Triple::UnknownEnvironment)
-      return nullptr;
-    return new SPIR32TargetInfo(Triple, Opts);
+    switch (os) {
+    case llvm::Triple::Linux:
+      return new LinuxTargetInfo<SPIR32TargetInfo>(Triple, Opts);
+    default:
+      return new SPIR32TargetInfo(Triple, Opts);
+    }
   }
   case llvm::Triple::spir64: {
-    if (Triple.getOS() != llvm::Triple::UnknownOS ||
-        Triple.getEnvironment() != llvm::Triple::UnknownEnvironment)
-      return nullptr;
-    return new SPIR64TargetInfo(Triple, Opts);
+    switch (os) {
+    case llvm::Triple::Linux:
+      return new LinuxTargetInfo<SPIR64TargetInfo>(Triple, Opts);
+    default:
+      return new SPIR64TargetInfo(Triple, Opts);
+    }
   }
+
   case llvm::Triple::wasm32:
     if (Triple.getSubArch() != llvm::Triple::NoSubArch ||
         Triple.getVendor() != llvm::Triple::UnknownVendor ||
