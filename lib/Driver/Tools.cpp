@@ -5247,6 +5247,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.getLastArg(options::OPT_sycl_is_device)) {
     CmdArgs.push_back("-sycl-is-device");
   }
+  if (Arg *A = Args.getLastArg(options::OPT_sycl_device_arch_EQ)) {
+    std::string SYCLArch = "-sycl-device-arch=";
+    SYCLArch += A->getValue();
+    CmdArgs.push_back(Args.MakeArgString(SYCLArch));
+  }
   if (Args.getLastArg(options::OPT_sycl_print_kernel_ast)) {
     CmdArgs.push_back("-sycl-print-kernel-ast");
   }

@@ -122,6 +122,9 @@ public:
   /// take into account in order to generate accurate offloading descriptors.
   std::vector<llvm::Triple> OMPTargetTriples;
 
+  /// \brief The SYCL device target passed as an option
+  std::string SYCLDeviceTriple;
+
   /// \brief Name of the IR file that contains the result of the OpenMP target
   /// host code generation.
   std::string OMPHostIRFile;

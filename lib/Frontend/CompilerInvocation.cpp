@@ -2108,6 +2108,8 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
     Opts.SYCLIsDevice = 1;
   if (Args.hasArg(OPT_sycl_print_kernel_ast))
     Opts.SYCLPrintKernelAST = 1;
+  if (Arg *A = Args.getLastArg(OPT_sycl_device_arch_EQ))
+    Opts.SYCLDeviceTriple = A->getValue();
 
   // Record whether the __DEPRECATED define was requested.
   Opts.Deprecated = Args.hasFlag(OPT_fdeprecated_macro,

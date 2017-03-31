@@ -400,6 +400,9 @@ def sycl : Flag<["-"], "sycl">, Group<opencl_Group>, Flags<[CC1Option]>,
 def sycl_is_device : Flag<["-"], "sycl-is-device">,
   Group<opencl_Group>, Flags<[CC1Option]>,
   HelpText<"Compile SYCL program for the target device">;
+def sycl_device_arch_EQ : Joined<["-"], "sycl-device-arch=">,
+  Flags<[DriverOption,CC1Option]>,
+  HelpText<"SYCL device architecture (e.g. spir64).">;
 // Look at ast-dump-filter too
 def sycl_print_kernel_ast : Flag<["-"], "sycl-print-kernel-ast">,
   Group<opencl_Group>, Flags<[CC1Option]>,
