@@ -2389,6 +2389,11 @@ bool CompilerInvocation::CreateFromArgs(CompilerInvocation &Res,
       Res.getCodeGenOpts().setFPContractMode(CodeGenOptions::FPC_Fast);
   }
 
+  if (!LangOpts.SYCLDeviceTriple.empty()) {
+    Res.getTargetOpts().HostTriple = Res.getTargetOpts().Triple;
+    Res.getTargetOpts().Triple = LangOpts.SYCLDeviceTriple;
+  }
+
   // FIXME: Override value name discarding when asan or msan is used because the
   // backend passes depend on the name of the alloca in order to print out
   // names.
