@@ -3188,13 +3188,13 @@ getCCForDeclaratorChunk(Sema &S, Declarator &D,
   // and AMDGPU targets, hence it cannot be treated as a calling
   // convention attribute. This is the simplest place to infer
   // calling convention for OpenCL kernels.
-  if (S.getLangOpts().OpenCL) {
+  if (S.getLangOpts().OpenCL || S.getLangOpts().SYCL) {
     for (const AttributeList *Attr = D.getDeclSpec().getAttributes().getList();
          Attr; Attr = Attr->getNext()) {
       if (Attr->getKind() == AttributeList::AT_OpenCLKernel) {
         llvm::Triple::ArchType arch = S.Context.getTargetInfo().getTriple().getArch();
         if (arch == llvm::Triple::spir || arch == llvm::Triple::spir64 ||
-            arch == llvm::Triple::amdgcn) {
+            arch == llvm::Triple::amdgcn || S.getLangOpts().SYCL) {
           CC = CC_OpenCLKernel;
         }
         break;
