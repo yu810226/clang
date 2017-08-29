@@ -2104,8 +2104,12 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   // Parse SYCL arguments
   if (Args.hasArg(OPT_sycl))
     Opts.SYCL = 1;
-  if (Args.hasArg(OPT_sycl_is_device))
+  if (Args.hasArg(OPT_sycl_is_device)) {
     Opts.SYCLIsDevice = 1;
+    // Force OpenCL version to 2.0 for now since there is no 2.2 yet
+    // Actually it breaks the normal mangling...
+    //Opts.OpenCLVersion = 200;
+  }
   if (Args.hasArg(OPT_sycl_print_kernel_ast))
     Opts.SYCLPrintKernelAST = 1;
   if (Arg *A = Args.getLastArg(OPT_sycl_device_arch_EQ))
