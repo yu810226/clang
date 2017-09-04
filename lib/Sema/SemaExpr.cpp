@@ -3989,6 +3989,20 @@ Sema::CreateUnaryExprOrTypeTraitExpr(TypeSourceInfo *TInfo,
       ExprKind, TInfo, Context.getSizeType(), OpLoc, R.getEnd());
 }
 
+namespace {
+class TransformSYCLAccessor : public TreeTransform<TransformSYCLAccessor> {
+  using BaseTransform = TreeTransform<TransformSYCLAccessor>;
+
+public:
+  TransformSYCLAccessor(Sema &SemaRef)
+      : BaseTransform(SemaRef) {}
+
+  bool AlreadyTransformed(QualType T) {
+      return true;
+    }
+};
+}
+
 /// \brief Build a sizeof or alignof expression given an expression
 /// operand.
 ExprResult
@@ -3999,7 +4013,10 @@ Sema::CreateUnaryExprOrTypeTraitExpr(Expr *E, SourceLocation OpLoc,
     return ExprError();
 
   E = PE.get();
-  
+
+  TransformSYCLAccessor TSA { *this };
+  E = TSA.TransformExpr(E).get();
+
   // Verify that the operand is valid.
   bool isInvalid = false;
   if (E->isTypeDependent()) {
@@ -12814,6 +12831,8 @@ namespace {
 }
 
 ExprResult Sema::TransformToPotentiallyEvaluated(Expr *E) {
+  llvm::errs() << "AST before Sema::TransformToPotentiallyEvaluated\n";
+  E->dumpColor();
   assert(isUnevaluatedContext() &&
          "Should only transform unevaluated expressions");
   ExprEvalContexts.back().Context =
