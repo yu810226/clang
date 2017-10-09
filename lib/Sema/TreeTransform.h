@@ -11117,8 +11117,11 @@ TreeTransform<Derived>::TransformLambdaExpr(LambdaExpr *E) {
                                     /*IsInstantiation*/ true);
   SavedContext.pop();
 
-  return getSema().BuildLambdaExpr(E->getLocStart(), Body.get()->getLocEnd(),
-                                   &LSICopy);
+  //return getSema().BuildLambdaExpr(E->getLocStart(), Body.get()->getLocEnd(),
+  //                                 &LSICopy);
+  auto e = getSema().BuildLambdaExpr(E->getLocStart(), Body.get()->getLocEnd(),
+                                     &LSICopy);
+  return e;
 }
 
 template<typename Derived>
