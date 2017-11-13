@@ -642,6 +642,8 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
     PMBuilder.PGOSampleUse = CodeGenOpts.SampleProfileFile;
 
   PMBuilder.populateFunctionPassManager(FPM);
+  if (LangOpts.SYCLIsDevice)
+  	PMBuilder.EnableLoopIdiom = false;
   PMBuilder.populateModulePassManager(MPM);
 }
 
