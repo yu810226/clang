@@ -642,8 +642,12 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
     PMBuilder.PGOSampleUse = CodeGenOpts.SampleProfileFile;
 
   PMBuilder.populateFunctionPassManager(FPM);
+  // Since llvm.memcpy intrinsics with potential mixed address spaces would
+  // choke current Xilinx xocc compiler, the EnableLoopIdiom flag here is set
+  // to false for not executing "loop idiom" pass when compiling souce code
+  // of SYCL kernel.
   if (LangOpts.SYCLIsDevice)
-  	PMBuilder.EnableLoopIdiom = false;
+    PMBuilder.EnableLoopIdiom = false;
   PMBuilder.populateModulePassManager(MPM);
 }
 
