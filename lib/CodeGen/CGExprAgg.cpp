@@ -1415,14 +1415,19 @@ static void CheckAggExprForMemSetUse(AggValueSlot &Slot, const Expr *E,
   CharUnits NumNonZeroBytes = GetNumNonZeroBytesInInit(E, CGF);
   if (NumNonZeroBytes*4 > Size)
     return;
-  
+
   // Okay, it seems like a good idea to use an initial memset, emit the call.
   llvm::Constant *SizeVal = CGF.Builder.getInt64(Size.getQuantity());
 
-  Address Loc = Slot.getAddress();  
-  Loc = CGF.Builder.CreateElementBitCast(Loc, CGF.Int8Ty);
+  Address Loc = Slot.getAddress();
+  if (CGF.getLangOpts().SYCLIsDevice) {
+    Loc = CGF.Builder.CreateElementBitCast(Loc, CGF.Builder.getInt8PtrTy(
+                                           Loc.getAddressSpace()));
+  } else {
+    Loc = CGF.Builder.CreateElementBitCast(Loc, CGF.Int8Ty);
+  }
   CGF.Builder.CreateMemSet(Loc, CGF.Builder.getInt8(0), SizeVal, false);
-  
+
   // Tell the AggExprEmitter that the slot is known zero.
   Slot.setZeroed();
 }

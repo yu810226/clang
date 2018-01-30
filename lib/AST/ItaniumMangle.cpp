@@ -1389,7 +1389,7 @@ void CXXNameMangler::mangleNestedName(const NamedDecl *ND,
                                       const DeclContext *DC,
                                       const AbiTagList *AdditionalAbiTags,
                                       bool NoFunction) {
-  // <nested-name> 
+  // <nested-name>
   //   ::= N [<CV-qualifiers>] [<ref-qualifier>] <prefix> <unqualified-name> E
   //   ::= N [<CV-qualifiers>] [<ref-qualifier>] <template-prefix> 
   //       <template-args> E
@@ -1401,10 +1401,20 @@ void CXXNameMangler::mangleNestedName(const NamedDecl *ND,
     // We do not consider restrict a distinguishing attribute for overloading
     // purposes so we must not mangle it.
     MethodQuals.removeRestrict();
+
+    // SYCL
+    //   The method can be overloaded based on the address space in SYCL
+    if (getASTContext().getLangOpts().SYCLIsDevice) {
+      unsigned int AS = Method->getType().getAddressSpace();
+
+      // Mangle method address space. It is needed to deduce a 'this' type
+      MethodQuals.setAddressSpace(AS);
+    }
+
     mangleQualifiers(MethodQuals);
     mangleRefQualifier(Method->getRefQualifier());
   }
-  
+
   // Check if we have a template.
   const TemplateArgumentList *TemplateArgs = nullptr;
   if (const TemplateDecl *TD = isTemplate(ND, TemplateArgs)) {
@@ -2099,8 +2109,11 @@ void CXXNameMangler::mangleQualifiers(Qualifiers Quals) {
       default: llvm_unreachable("Not a language specific address space");
       //  <OpenCL-addrspace> ::= "CL" [ "global" | "local" | "constant" ]
       case LangAS::opencl_global:   ASString = "CLglobal";   break;
+      //case 1:   ASString = "CLglobal";   break;
       case LangAS::opencl_local:    ASString = "CLlocal";    break;
+      //case 3:    ASString = "CLlocal";    break;
       case LangAS::opencl_constant: ASString = "CLconstant"; break;
+      //case 2:    ASString = "CLconstant"; break;
       //  <CUDA-addrspace> ::= "CU" [ "device" | "constant" | "shared" ]
       case LangAS::cuda_device:     ASString = "CUdevice";   break;
       case LangAS::cuda_constant:   ASString = "CUconstant"; break;

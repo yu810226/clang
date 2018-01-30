@@ -103,8 +103,32 @@ static void EmitDeclDestroy(CodeGenFunction &CGF, const VarDecl &D,
     CXXDestructorDecl *dtor = Record->getDestructor();
 
     function = CGM.getAddrOfCXXStructor(dtor, StructorType::Complete);
-    argument = llvm::ConstantExpr::getBitCast(
+
+    // SYCL
+    //   Try to convert address of "this" to pointer of type required by
+    //   destructor, but taking into consideration address spaces.
+    if (CGM.getLangOpts().SYCLIsDevice) {
+      unsigned dtorFnAS = 0; // SYCL default address space 0
+
+      if(auto fn = llvm::dyn_cast<llvm::Function>(function)) {
+        auto fnTy = fn->getFunctionType();
+        if (fnTy->getNumParams() > 0 && fnTy->getParamType(0)->isPointerTy())
+          dtorFnAS = fnTy->getParamType(0)->getPointerAddressSpace();
+      }
+
+      // The code is after verification and these address spaces should be
+      // convertible (this -> dtor AS).
+      argument = llvm::ConstantExpr::getPointerBitCastOrAddrSpaceCast(
+        addr.getPointer(), CGF.getTypes().ConvertType(type)->getPointerTo(dtorFnAS));
+    }
+    //else if (type.hasAddressSpace()) {
+    //  argument = llvm::ConstantExpr::getAddrSpaceCast(
+    //    addr.getPointer(), CGF.getTypes().ConvertType(type)->getPointerTo());
+    //}
+    else {
+      argument = llvm::ConstantExpr::getBitCast(
         addr.getPointer(), CGF.getTypes().ConvertType(type)->getPointerTo());
+    }
 
   // Otherwise, the standard logic requires a helper function.
   } else {
@@ -132,9 +156,18 @@ static void EmitDeclInvariant(CodeGenFunction &CGF, const VarDecl &D,
   // Emit a call with the size in bytes of the object.
   CharUnits WidthChars = CGF.getContext().getTypeSizeInChars(D.getType());
   uint64_t Width = WidthChars.getQuantity();
-  llvm::Value *Args[2] = { llvm::ConstantInt::getSigned(CGF.Int64Ty, Width),
-                           llvm::ConstantExpr::getBitCast(Addr, CGF.Int8PtrTy)};
-  CGF.Builder.CreateCall(InvariantStart, Args);
+  if (CGF.CGM.getLangOpts().SYCLIsDevice) {
+    llvm::Value *Args[2] = { llvm::ConstantInt::getSigned(CGF.Int64Ty, Width),
+                             D.getType().hasAddressSpace()?
+                             llvm::ConstantExpr::getAddrSpaceCast(Addr,
+                                                                  CGF.Int8PtrTy):
+                             llvm::ConstantExpr::getBitCast(Addr, CGF.Int8PtrTy)};
+    CGF.Builder.CreateCall(InvariantStart, Args);
+  } else {
+    llvm::Value *Args[2] = { llvm::ConstantInt::getSigned(CGF.Int64Ty, Width),
+                             llvm::ConstantExpr::getBitCast(Addr, CGF.Int8PtrTy)};
+    CGF.Builder.CreateCall(InvariantStart, Args);
+  }
 }
 
 void CodeGenFunction::EmitCXXGlobalVarDeclInit(const VarDecl &D,

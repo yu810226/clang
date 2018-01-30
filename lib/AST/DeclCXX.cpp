@@ -1681,6 +1681,8 @@ QualType CXXMethodDecl::getThisType(ASTContext &C) const {
   QualType ClassTy = C.getTypeDeclType(getParent());
   ClassTy = C.getQualifiedType(ClassTy,
                                Qualifiers::fromCVRUMask(getTypeQualifiers()));
+  if (C.getLangOpts().SYCLIsDevice)
+    ClassTy = C.getAddrSpaceQualType(ClassTy, getType().getAddressSpace());
   return C.getPointerType(ClassTy);
 }
 

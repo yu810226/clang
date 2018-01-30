@@ -50,7 +50,16 @@ void CodeGenTypes::addRecordTypeName(const RecordDecl *RD,
   SmallString<256> TypeName;
   llvm::raw_svector_ostream OS(TypeName);
   OS << RD->getKindName() << '.';
-  
+
+  // For SYCL, the mangled type name is attached, so it can be
+  // reflown to proper name later.
+  if (getContext().getLangOpts().SYCLIsDevice) {
+    std::unique_ptr<MangleContext> MC(getContext().createMangleContext());
+    auto RDT = getContext().getRecordType(RD);
+    MC->mangleCXXRTTIName(RDT, OS);
+    OS << ".";
+  }
+
   // Name the codegen type after the typedef name
   // if there is no tag type name available
   if (RD->getIdentifier()) {

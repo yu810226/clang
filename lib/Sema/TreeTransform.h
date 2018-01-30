@@ -4039,6 +4039,50 @@ TreeTransform<Derived>::TransformQualifiedType(TypeLocBuilder &TLB,
   if (Result.isNull())
     return QualType();
 
+  // SYCL
+  if(SemaRef.Context.getLangOpts().SYCLIsDevice) {
+    // Member functions can be qualified with the address space
+    if(Result->isFunctionType() &&
+      Quals.hasAddressSpace() && !Result.hasAddressSpace()) {
+      Qualifiers ResultQuals = Result.getQualifiers();
+      ResultQuals.setAddressSpace(Quals.getAddressSpace());
+      Result = SemaRef.BuildQualifiedType(Result,
+                                          T.getBeginLoc(),
+                                          ResultQuals);
+      TLB.push<QualifiedTypeLoc>(Result);
+    } else if(Quals.hasAddressSpace()) {
+      const AutoType *AutoTy;
+      if (Result.hasAddressSpace()) {
+        if (const SubstTemplateTypeParmType *SubstTypeParam =
+                                 dyn_cast<SubstTemplateTypeParmType>(Result)) {
+          QualType Replacement = SubstTypeParam->getReplacementType();
+          Qualifiers Qs = Replacement.getQualifiers();
+          Qs.removeAddressSpace();
+          Replacement = SemaRef.Context.getQualifiedType(
+                                              Replacement.getUnqualifiedType(),
+                                              Qs);
+          Result = SemaRef.Context.getSubstTemplateTypeParmType(
+                                        SubstTypeParam->getReplacedParameter(),
+                                        Replacement);
+          TLB.TypeWasModifiedSafely(Result);
+        } else if ((AutoTy = dyn_cast<AutoType>(Result)) &&
+                   AutoTy->isDeduced()) {
+          // 'auto' types behave the same way as template parameters.
+          QualType Deduced = AutoTy->getDeducedType();
+          Qualifiers Qs = Deduced.getQualifiers();
+          Qs.removeAddressSpace();
+          Deduced = SemaRef.Context.getQualifiedType(
+                                                  Deduced.getUnqualifiedType(),
+                                                  Qs);
+          Result = SemaRef.Context.getAutoType(Deduced,
+                                               AutoTypeKeyword::DecltypeAuto,
+                                               AutoTy->isDependentType());
+          TLB.TypeWasModifiedSafely(Result);
+        }
+      }
+    }
+  }
+
   // Silently suppress qualifiers if the result type can't be qualified.
   // FIXME: this is the right thing for template instantiation, but
   // probably not for other clients.

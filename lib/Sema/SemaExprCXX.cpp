@@ -2211,16 +2211,28 @@ bool Sema::FindAllocationOverload(SourceLocation StartLoc, SourceRange Range,
     NamedDecl *D = (*Alloc)->getUnderlyingDecl();
 
     if (FunctionTemplateDecl *FnTemplate = dyn_cast<FunctionTemplateDecl>(D)) {
-      AddTemplateOverloadCandidate(FnTemplate, Alloc.getPair(),
-                                   /*ExplicitTemplateArgs=*/nullptr,
-                                   Args, Candidates,
-                                   /*SuppressUserConversions=*/false);
+      if (getLangOpts().SYCLIsDevice) {
+        AddTemplateOverloadCandidate(FnTemplate, Alloc.getPair(),
+                                     /*ExplicitTemplateArgs=*/nullptr,
+                                     QualType(), Args, Candidates,
+                                     /*SuppressUserConversions=*/false);
+      } else {
+        AddTemplateOverloadCandidate(FnTemplate, Alloc.getPair(),
+                                     /*ExplicitTemplateArgs=*/nullptr,
+                                     Args, Candidates,
+                                     /*SuppressUserConversions=*/false);
+      }
       continue;
     }
 
     FunctionDecl *Fn = cast<FunctionDecl>(D);
-    AddOverloadCandidate(Fn, Alloc.getPair(), Args, Candidates,
-                         /*SuppressUserConversions=*/false);
+    if (getLangOpts().SYCLIsDevice) {
+      AddOverloadCandidate(Fn, Alloc.getPair(), Args, Candidates, QualType(),
+                           /*SuppressUserConversions=*/false);
+    } else {
+      AddOverloadCandidate(Fn, Alloc.getPair(), Args, Candidates,
+                           /*SuppressUserConversions=*/false);
+    }
   }
 
   // Do the resolution.
@@ -2920,8 +2932,9 @@ Sema::ActOnCXXDelete(SourceLocation StartLoc, bool UseGlobal,
     QualType Pointee = Type->getAs<PointerType>()->getPointeeType();
     QualType PointeeElem = Context.getBaseElementType(Pointee);
 
-    if (unsigned AddressSpace = Pointee.getAddressSpace())
-      return Diag(Ex.get()->getLocStart(), 
+    if (unsigned AddressSpace = Pointee.getAddressSpace()
+         && !getLangOpts().SYCLIsDevice)
+      return Diag(Ex.get()->getLocStart(),
                   diag::err_address_space_qualified_delete)
                << Pointee.getUnqualifiedType() << AddressSpace;
 

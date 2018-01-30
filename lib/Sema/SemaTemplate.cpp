@@ -5512,8 +5512,17 @@ Sema::BuildExpressionFromDeclTemplateArgument(const TemplateArgument &Arg,
   // type that the reference refers to.
   if (const ReferenceType *TargetRef = ParamType->getAs<ReferenceType>()) {
     VK = VK_LValue;
-    T = Context.getQualifiedType(T,
-                              TargetRef->getPointeeType().getQualifiers());
+
+    // SYCL
+    //   Allow template arguments in the named address space to be
+    //   converted to the generic address space
+    Qualifiers quals = TargetRef->getPointeeType().getQualifiers();
+    if(Context.getLangOpts().SYCLIsDevice &&
+       quals.isAddressSpaceSupersetOf(T.getQualifiers())) {
+      quals.removeAddressSpace();
+    }
+
+    T = Context.getQualifiedType(T, quals);
   } else if (isa<FunctionDecl>(VD)) {
     // References to functions are always lvalues.
     VK = VK_LValue;

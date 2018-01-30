@@ -2246,7 +2246,10 @@ void ASTContext::adjustDeducedFunctionResultType(FunctionDecl *FD,
   while (true) {
     const FunctionProtoType *FPT = FD->getType()->castAs<FunctionProtoType>();
     FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
-    FD->setType(getFunctionType(ResultType, FPT->getParamTypes(), EPI));
+    QualType FnTy = getFunctionType(ResultType, FPT->getParamTypes(), EPI);
+    if (getLangOpts().SYCLIsDevice)
+      FnTy = getAddrSpaceQualType(FnTy, FD->getType().getAddressSpace());
+    FD->setType(FnTy);
     if (FunctionDecl *Next = FD->getPreviousDecl())
       FD = Next;
     else
@@ -2279,9 +2282,12 @@ static QualType getFunctionTypeWithExceptionSpec(
   // Anything else must be a function type. Rebuild it with the new exception
   // specification.
   const FunctionProtoType *Proto = cast<FunctionProtoType>(Orig);
-  return Context.getFunctionType(
+  QualType FnTy = Context.getFunctionType(
       Proto->getReturnType(), Proto->getParamTypes(),
       Proto->getExtProtoInfo().withExceptionSpec(ESI));
+  if (Context.getLangOpts().SYCLIsDevice)
+    FnTy = Context.getAddrSpaceQualType(FnTy, Orig.getAddressSpace());
+  return FnTy;
 }
 
 void ASTContext::adjustExceptionSpec(

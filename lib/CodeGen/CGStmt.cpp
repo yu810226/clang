@@ -1022,23 +1022,33 @@ void CodeGenFunction::EmitReturnStmt(const ReturnStmt &S) {
     // If this function returns a reference, take the address of the expression
     // rather than the value.
     RValue Result = EmitReferenceBindingToExpr(RV);
+    if (getLangOpts().SYCLIsDevice) {
+      llvm::Value *V = EmitAddrSpaceCast(Result.getScalarVal(),
+                                         ReturnValue.getElementType());
+    }
     Builder.CreateStore(Result.getScalarVal(), ReturnValue);
   } else {
     switch (getEvaluationKind(RV->getType())) {
-    case TEK_Scalar:
-      Builder.CreateStore(EmitScalarExpr(RV), ReturnValue);
-      break;
+    case TEK_Scalar: {
+        if (getLangOpts().SYCLIsDevice) {
+          llvm::Value *V = EmitAddrSpaceCast(EmitScalarExpr(RV),
+                                  ReturnValue.getElementType());
+        }
+        Builder.CreateStore(EmitScalarExpr(RV), ReturnValue);
+        break;
+      }
     case TEK_Complex:
       EmitComplexExprIntoLValue(RV, MakeAddrLValue(ReturnValue, RV->getType()),
                                 /*isInit*/ true);
       break;
-    case TEK_Aggregate:
-      EmitAggExpr(RV, AggValueSlot::forAddr(ReturnValue,
-                                            Qualifiers(),
-                                            AggValueSlot::IsDestructed,
-                                            AggValueSlot::DoesNotNeedGCBarriers,
-                                            AggValueSlot::IsNotAliased));
-      break;
+    case TEK_Aggregate: {
+        EmitAggExpr(RV, AggValueSlot::forAddr(ReturnValue,
+                                              Qualifiers(),
+                                              AggValueSlot::IsDestructed,
+                                              AggValueSlot::DoesNotNeedGCBarriers,
+                                              AggValueSlot::IsNotAliased));
+        break;
+      }
     }
   }
 
