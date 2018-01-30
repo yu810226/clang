@@ -1883,14 +1883,27 @@ Sema::DiagnoseEmptyLookup(Scope *S, CXXScopeSpec &SS, LookupResult &R,
         OverloadCandidateSet::iterator Best;
         for (NamedDecl *CD : Corrected) {
           if (FunctionTemplateDecl *FTD =
-                   dyn_cast<FunctionTemplateDecl>(CD))
-            AddTemplateOverloadCandidate(
-                FTD, DeclAccessPair::make(FTD, AS_none), ExplicitTemplateArgs,
-                Args, OCS);
-          else if (FunctionDecl *FD = dyn_cast<FunctionDecl>(CD))
-            if (!ExplicitTemplateArgs || ExplicitTemplateArgs->size() == 0)
-              AddOverloadCandidate(FD, DeclAccessPair::make(FD, AS_none),
-                                   Args, OCS);
+                   dyn_cast<FunctionTemplateDecl>(CD)) {
+            if (getLangOpts().SYCLIsDevice) {
+              AddTemplateOverloadCandidate(
+                  FTD, DeclAccessPair::make(FTD, AS_none), ExplicitTemplateArgs,
+                  QualType(), Args, OCS);
+            } else {
+              AddTemplateOverloadCandidate(
+                  FTD, DeclAccessPair::make(FTD, AS_none), ExplicitTemplateArgs,
+                  Args, OCS);
+            }
+          } else if (FunctionDecl *FD = dyn_cast<FunctionDecl>(CD)) {
+            if (!ExplicitTemplateArgs || ExplicitTemplateArgs->size() == 0) {
+              if (getLangOpts().SYCLIsDevice) {
+                AddOverloadCandidate(FD, DeclAccessPair::make(FD, AS_none),
+                                     Args, OCS, QualType());
+              } else {
+                AddOverloadCandidate(FD, DeclAccessPair::make(FD, AS_none),
+                                     Args, OCS);
+              }
+            }
+          }
         }
         switch (OCS.BestViableFunction(*this, R.getNameLoc(), Best)) {
         case OR_Success:
@@ -4653,9 +4666,15 @@ static TypoCorrection TryTypoCorrectionForCall(Sema &S, Expr *Fn,
         OverloadCandidateSet OCS(NameLoc, OverloadCandidateSet::CSK_Normal);
         OverloadCandidateSet::iterator Best;
         for (NamedDecl *CD : Corrected) {
-          if (FunctionDecl *FD = dyn_cast<FunctionDecl>(CD))
-            S.AddOverloadCandidate(FD, DeclAccessPair::make(FD, AS_none), Args,
-                                   OCS);
+          if (FunctionDecl *FD = dyn_cast<FunctionDecl>(CD)) {
+            if (S.getLangOpts().SYCLIsDevice) {
+              S.AddOverloadCandidate(FD, DeclAccessPair::make(FD, AS_none),
+                                     Args, OCS, QualType());
+            } else {
+              S.AddOverloadCandidate(FD, DeclAccessPair::make(FD, AS_none),
+                                     Args, OCS);
+            }
+          }
         }
         switch (OCS.BestViableFunction(S, NameLoc, Best)) {
         case OR_Success:

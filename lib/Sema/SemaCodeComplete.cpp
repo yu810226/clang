@@ -4439,13 +4439,21 @@ void Sema::CodeCompleteCall(Scope *S, Expr *Fn, ArrayRef<Expr *> Args) {
       FD = dyn_cast<FunctionDecl>(DRE->getDecl());
     if (FD) { // We check whether it's a resolved function declaration.
       if (!getLangOpts().CPlusPlus ||
-          !FD->getType()->getAs<FunctionProtoType>())
+          !FD->getType()->getAs<FunctionProtoType>()) {
         Results.push_back(ResultCandidate(FD));
-      else
-        AddOverloadCandidate(FD, DeclAccessPair::make(FD, FD->getAccess()),
-                             Args, CandidateSet,
-                             /*SuppressUsedConversions=*/false,
-                             /*PartialOverloading=*/true);
+      } else {
+        if (getLangOpts().SYCLIsDevice) {
+          AddOverloadCandidate(FD, DeclAccessPair::make(FD, FD->getAccess()),
+                               Args, CandidateSet, QualType(),
+                               /*SuppressUsedConversions=*/false,
+                               /*PartialOverloading=*/true);
+        } else {
+          AddOverloadCandidate(FD, DeclAccessPair::make(FD, FD->getAccess()),
+                               Args, CandidateSet,
+                               /*SuppressUsedConversions=*/false,
+                               /*PartialOverloading=*/true);
+        }
+      }
 
     } else if (auto DC = NakedFn->getType()->getAsCXXRecordDecl()) {
       // If expression's type is CXXRecordDecl, it may overload the function
@@ -4509,17 +4517,33 @@ void Sema::CodeCompleteConstructor(Scope *S, QualType Type, SourceLocation Loc,
 
   for (auto C : LookupConstructors(RD)) {
     if (auto FD = dyn_cast<FunctionDecl>(C)) {
-      AddOverloadCandidate(FD, DeclAccessPair::make(FD, C->getAccess()),
-                           Args, CandidateSet,
-                           /*SuppressUsedConversions=*/false,
-                           /*PartialOverloading=*/true);
+      if (getLangOpts().SYCLIsDevice) {
+        AddOverloadCandidate(FD, DeclAccessPair::make(FD, C->getAccess()),
+                             Args, CandidateSet, Type,
+                             /*SuppressUsedConversions=*/false,
+                             /*PartialOverloading=*/true);
+      } else {
+        AddOverloadCandidate(FD, DeclAccessPair::make(FD, C->getAccess()),
+                             Args, CandidateSet,
+                             /*SuppressUsedConversions=*/false,
+                             /*PartialOverloading=*/true);
+      }
     } else if (auto FTD = dyn_cast<FunctionTemplateDecl>(C)) {
-      AddTemplateOverloadCandidate(FTD,
-                                   DeclAccessPair::make(FTD, C->getAccess()),
-                                   /*ExplicitTemplateArgs=*/nullptr,
-                                   Args, CandidateSet,
-                                   /*SuppressUsedConversions=*/false,
-                                   /*PartialOverloading=*/true);
+      if (getLangOpts().SYCLIsDevice) {
+        AddTemplateOverloadCandidate(FTD,
+                                     DeclAccessPair::make(FTD, C->getAccess()),
+                                     /*ExplicitTemplateArgs=*/nullptr,
+                                     Type, Args, CandidateSet,
+                                     /*SuppressUsedConversions=*/false,
+                                     /*PartialOverloading=*/true);
+      } else {
+        AddTemplateOverloadCandidate(FTD,
+                                     DeclAccessPair::make(FTD, C->getAccess()),
+                                     /*ExplicitTemplateArgs=*/nullptr,
+                                     Args, CandidateSet,
+                                     /*SuppressUsedConversions=*/false,
+                                     /*PartialOverloading=*/true);
+      }
     }
   }
 

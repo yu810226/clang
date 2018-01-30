@@ -8431,8 +8431,16 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
           NewFD->getType()->castAs<FunctionProtoType>();
       QualType Result =
           SubstAutoType(FPT->getReturnType(), Context.DependentTy);
-      NewFD->setType(Context.getFunctionType(Result, FPT->getParamTypes(),
-                                             FPT->getExtProtoInfo()));
+      QualType FuncType = Context.getFunctionType(Result, FPT->getParamTypes(),
+                                                  FPT->getExtProtoInfo());
+
+      // SYCL
+      //   Methods can be qualified with address space
+      if (getLangOpts().SYCLIsDevice && NewFD->getType().hasAddressSpace()) {
+        FuncType = Context.getAddrSpaceQualType(FuncType,
+                                                NewFD->getType().getAddressSpace());
+      }
+      NewFD->setType(FuncType);
     }
 
     // C++ [dcl.fct.spec]p3:

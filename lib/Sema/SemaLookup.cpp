@@ -2997,28 +2997,49 @@ Sema::SpecialMemberOverloadResult Sema::LookupSpecialMember(CXXRecordDecl *RD,
     DeclAccessPair Cand = DeclAccessPair::make(CandDecl, AS_public);
     auto CtorInfo = getConstructorInfo(Cand);
     if (CXXMethodDecl *M = dyn_cast<CXXMethodDecl>(Cand->getUnderlyingDecl())) {
-      if (SM == CXXCopyAssignment || SM == CXXMoveAssignment)
+      if (SM == CXXCopyAssignment || SM == CXXMoveAssignment) {
         AddMethodCandidate(M, Cand, RD, ThisTy, Classification,
                            llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
-      else if (CtorInfo)
-        AddOverloadCandidate(CtorInfo.Constructor, CtorInfo.FoundDecl,
-                             llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
-      else
-        AddOverloadCandidate(M, Cand, llvm::makeArrayRef(&Arg, NumArgs), OCS,
-                             true);
+      } else if (CtorInfo) {
+        if (getLangOpts().SYCLIsDevice)
+          AddOverloadCandidate(CtorInfo.Constructor, CtorInfo.FoundDecl,
+                               llvm::makeArrayRef(&Arg, NumArgs), OCS,
+                               ThisTy, true);
+        else
+          AddOverloadCandidate(CtorInfo.Constructor, CtorInfo.FoundDecl,
+                               llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
+      } else {
+        if (getLangOpts().SYCLIsDevice)
+          AddOverloadCandidate(M, Cand, llvm::makeArrayRef(&Arg, NumArgs), OCS,
+                               ThisTy, true);
+        else
+          AddOverloadCandidate(M, Cand, llvm::makeArrayRef(&Arg, NumArgs), OCS,
+                               true);
+      }
     } else if (FunctionTemplateDecl *Tmpl =
                  dyn_cast<FunctionTemplateDecl>(Cand->getUnderlyingDecl())) {
-      if (SM == CXXCopyAssignment || SM == CXXMoveAssignment)
+      if (SM == CXXCopyAssignment || SM == CXXMoveAssignment) {
         AddMethodTemplateCandidate(
             Tmpl, Cand, RD, nullptr, ThisTy, Classification,
             llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
-      else if (CtorInfo)
-        AddTemplateOverloadCandidate(
-            CtorInfo.ConstructorTmpl, CtorInfo.FoundDecl, nullptr,
-            llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
-      else
-        AddTemplateOverloadCandidate(
-            Tmpl, Cand, nullptr, llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
+      } else if (CtorInfo) {
+        if (getLangOpts().SYCLIsDevice)
+          AddTemplateOverloadCandidate(
+              CtorInfo.ConstructorTmpl, CtorInfo.FoundDecl, nullptr, ThisTy,
+              llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
+        else
+          AddTemplateOverloadCandidate(
+              CtorInfo.ConstructorTmpl, CtorInfo.FoundDecl, nullptr,
+              llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
+      } else {
+        if (getLangOpts().SYCLIsDevice)
+          AddTemplateOverloadCandidate(
+              Tmpl, Cand, nullptr, ThisTy,
+              llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
+        else
+          AddTemplateOverloadCandidate(
+              Tmpl, Cand, nullptr, llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
+      }
     } else {
       assert(isa<UsingDecl>(Cand.getDecl()) &&
              "illegal Kind of operator = Decl");

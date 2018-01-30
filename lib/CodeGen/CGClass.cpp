@@ -246,7 +246,12 @@ ApplyNonVirtualAndVirtualOffset(CodeGenFunction &CGF, Address addr,
 
   // Apply the base offset.
   llvm::Value *ptr = addr.getPointer();
-  ptr = CGF.Builder.CreateBitCast(ptr, CGF.Int8PtrTy);
+  if (CGF.getLangOpts().SYCLIsDevice) {
+    ptr = CGF.Builder.CreateBitCast(ptr, CGF.Builder.getInt8PtrTy(
+                                    ptr->getType()->getPointerAddressSpace()));
+  } else {
+    ptr = CGF.Builder.CreateBitCast(ptr, CGF.Int8PtrTy);
+  }
   ptr = CGF.Builder.CreateInBoundsGEP(ptr, baseOffset, "add.ptr");
 
   // If we have a virtual component, the alignment of the result will
@@ -301,8 +306,14 @@ Address CodeGenFunction::GetAddressOfBaseClass(
   }
 
   // Get the base pointer type.
-  llvm::Type *BasePtrTy =
-    ConvertType((PathEnd[-1])->getType())->getPointerTo();
+  llvm::Type *BasePtrTy;
+  if (getContext().getLangOpts().SYCLIsDevice) {
+    BasePtrTy =
+    ConvertType((PathEnd[-1])->getType())->getPointerTo(
+                 Value.getAddressSpace());
+  } else {
+    BasePtrTy = ConvertType((PathEnd[-1])->getType())->getPointerTo();
+  }
 
   QualType DerivedTy = getContext().getRecordType(Derived);
   CharUnits DerivedAlign = CGM.getClassPointerAlignment(Derived);
@@ -380,7 +391,13 @@ CodeGenFunction::GetAddressOfDerivedClass(Address BaseAddr,
 
   QualType DerivedTy =
     getContext().getCanonicalType(getContext().getTagDeclType(Derived));
-  llvm::Type *DerivedPtrTy = ConvertType(DerivedTy)->getPointerTo();
+  llvm::Type *DerivedPtrTy;
+  if (getContext().getLangOpts().SYCLIsDevice) {
+    DerivedPtrTy = ConvertType(DerivedTy)->getPointerTo(
+                             BaseAddr.getAddressSpace());
+  } else {
+    DerivedPtrTy = ConvertType(DerivedTy)->getPointerTo();
+  }
 
   llvm::Value *NonVirtualOffset =
     CGM.GetNonVirtualBaseClassOffset(Derived, PathBegin, PathEnd);

@@ -70,6 +70,17 @@ unsigned CodeGenTypes::ClangCallConvToLLVMCallConv(CallingConv CC) {
 /// Derives the 'this' type for codegen purposes, i.e. ignoring method
 /// qualification.
 /// FIXME: address space qualification?
+static CanQualType GetThisType(ASTContext &Context, const CXXRecordDecl *RD,
+                               unsigned int addressSpace) {
+  QualType RecTy = Context.getTagDeclType(RD)->getCanonicalTypeInternal();
+  if (Context.getLangOpts().SYCLIsDevice)
+    RecTy = Context.getAddrSpaceQualType(RecTy, addressSpace);
+  return Context.getPointerType(CanQualType::CreateUnsafe(RecTy));
+}
+
+/// Derives the 'this' type for codegen purposes, i.e. ignoring method
+/// qualification.
+/// FIXME: address space qualification?
 static CanQualType GetThisType(ASTContext &Context, const CXXRecordDecl *RD) {
   QualType RecTy = Context.getTagDeclType(RD)->getCanonicalTypeInternal();
   return Context.getPointerType(CanQualType::CreateUnsafe(RecTy));
@@ -241,14 +252,19 @@ static CallingConv getCallingConventionForDecl(const Decl *D, bool IsWindows) {
 const CGFunctionInfo &
 CodeGenTypes::arrangeCXXMethodType(const CXXRecordDecl *RD,
                                    const FunctionProtoType *FTP,
-                                   const CXXMethodDecl *MD) {
+                                   const CXXMethodDecl *MD,
+                                   unsigned int addressSpace) {
   SmallVector<CanQualType, 16> argTypes;
 
   // Add the 'this' pointer.
-  if (RD)
-    argTypes.push_back(GetThisType(Context, RD));
-  else
+  if (RD) {
+    if (Context.getLangOpts().SYCLIsDevice)
+      argTypes.push_back(GetThisType(Context, RD, addressSpace));
+    else
+      argTypes.push_back(GetThisType(Context, RD));
+  } else {
     argTypes.push_back(Context.VoidPtrTy);
+  }
 
   return ::arrangeLLVMFunctionInfo(
       *this, true, argTypes,
@@ -269,7 +285,11 @@ CodeGenTypes::arrangeCXXMethodDeclaration(const CXXMethodDecl *MD) {
   if (MD->isInstance()) {
     // The abstract case is perfectly fine.
     const CXXRecordDecl *ThisType = TheCXXABI.getThisArgumentTypeForMethod(MD);
-    return arrangeCXXMethodType(ThisType, prototype.getTypePtr(), MD);
+    if (Context.getLangOpts().SYCLIsDevice)
+      return arrangeCXXMethodType(ThisType, prototype.getTypePtr(), MD,
+                                MD->getType().getAddressSpace());
+    else
+      return arrangeCXXMethodType(ThisType, prototype.getTypePtr(), MD);
   }
 
   return arrangeFreeFunctionType(prototype, MD);
@@ -290,7 +310,11 @@ CodeGenTypes::arrangeCXXStructorDeclaration(const CXXMethodDecl *MD,
 
   SmallVector<CanQualType, 16> argTypes;
   SmallVector<FunctionProtoType::ExtParameterInfo, 16> paramInfos;
-  argTypes.push_back(GetThisType(Context, MD->getParent()));
+  if (Context.getLangOpts().SYCLIsDevice)
+    argTypes.push_back(GetThisType(Context, MD->getParent(),
+                                   MD->getType().getAddressSpace()));
+  else
+    argTypes.push_back(GetThisType(Context, MD->getParent()));
 
   bool PassParams = true;
 
@@ -516,10 +540,18 @@ const CGFunctionInfo &
 CodeGenTypes::arrangeMSMemberPointerThunk(const CXXMethodDecl *MD) {
   assert(MD->isVirtual() && "only virtual memptrs have thunks");
   CanQual<FunctionProtoType> FTP = GetFormalType(MD);
-  CanQualType ArgTys[] = { GetThisType(Context, MD->getParent()) };
-  return arrangeLLVMFunctionInfo(Context.VoidTy, /*instanceMethod=*/false,
-                                 /*chainCall=*/false, ArgTys,
-                                 FTP->getExtInfo(), {}, RequiredArgs(1));
+  if (Context.getLangOpts().SYCLIsDevice) {
+    CanQualType ArgTys[] = { GetThisType(Context, MD->getParent(),
+                                         MD->getType().getAddressSpace()) };
+    return arrangeLLVMFunctionInfo(Context.VoidTy, /*instanceMethod=*/false,
+                                   /*chainCall=*/false, ArgTys,
+                                   FTP->getExtInfo(), {}, RequiredArgs(1));
+  } else {
+    CanQualType ArgTys[] = { GetThisType(Context, MD->getParent()) };
+    return arrangeLLVMFunctionInfo(Context.VoidTy, /*instanceMethod=*/false,
+                                   /*chainCall=*/false, ArgTys,
+                                   FTP->getExtInfo(), {}, RequiredArgs(1));
+  }
 }
 
 const CGFunctionInfo &
@@ -530,7 +562,10 @@ CodeGenTypes::arrangeMSCtorClosure(const CXXConstructorDecl *CD,
   CanQual<FunctionProtoType> FTP = GetFormalType(CD);
   SmallVector<CanQualType, 2> ArgTys;
   const CXXRecordDecl *RD = CD->getParent();
-  ArgTys.push_back(GetThisType(Context, RD));
+  if (Context.getLangOpts().SYCLIsDevice)
+    ArgTys.push_back(GetThisType(Context, RD, CD->getType().getAddressSpace()));
+  else
+    ArgTys.push_back(GetThisType(Context, RD));
   if (CT == Ctor_CopyingClosure)
     ArgTys.push_back(*FTP->param_type_begin());
   if (RD->getNumVBases() > 0)
@@ -1568,6 +1603,13 @@ CodeGenTypes::GetFunctionType(const CGFunctionInfo &FI) {
     QualType Ret = FI.getReturnType();
     llvm::Type *Ty = ConvertType(Ret);
     unsigned AddressSpace = Context.getTargetAddressSpace(Ret);
+
+    // SYCL
+    //   The value returned from function can't be in the address space.
+    //   For now, set to address space 0 to advoid it
+    if (Context.getLangOpts().SYCLIsDevice)
+      AddressSpace = 0;
+
     ArgTypes[IRFunctionArgs.getSRetArgNo()] =
         llvm::PointerType::get(Ty, AddressSpace);
   }
@@ -2403,11 +2445,14 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
         if (isPromoted)
           V = emitArgumentDemotion(*this, Arg, V);
 
+        llvm::Type *LTy = ConvertType(Arg->getType());
+        if (getContext().getLangOpts().SYCLIsDevice)
+          V = EmitAddrSpaceCast(V, LTy);
+
         // Because of merging of function types from multiple decls it is
         // possible for the type of an argument to not match the corresponding
         // type in the function type. Since we are codegening the callee
         // in here, add a cast to the argument type.
-        llvm::Type *LTy = ConvertType(Arg->getType());
         if (V->getType() != LTy)
           V = Builder.CreateBitCast(V, LTy);
 
@@ -3775,6 +3820,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   // If the call returns a temporary with struct return, create a temporary
   // alloca to hold the result, unless one is given to us.
   Address SRetPtr = Address::invalid();
+  llvm::Value *SRetPtrVal = nullptr;
   size_t UnusedReturnSize = 0;
   if (RetAI.isIndirect() || RetAI.isInAlloca() || RetAI.isCoerceAndExpand()) {
     if (!ReturnValue.isNull()) {
@@ -3788,11 +3834,21 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
           UnusedReturnSize = size;
       }
     }
+    SRetPtrVal = SRetPtr.getPointer();
+
     if (IRFunctionArgs.hasSRetArg()) {
-      IRCallArgs[IRFunctionArgs.getSRetArgNo()] = SRetPtr.getPointer();
+      // SYCL
+      //   The return structure pointer is in address space 0,
+      //   so the address space cast is required
+      if (CGM.getContext().getLangOpts().SYCLIsDevice) {
+        SRetPtrVal = Builder.CreateAddrSpaceCast(SRetPtrVal,
+                        IRFuncTy->getParamType(IRFunctionArgs.getSRetArgNo()));
+      }
+
+      IRCallArgs[IRFunctionArgs.getSRetArgNo()] = SRetPtrVal;
     } else if (RetAI.isInAlloca()) {
       Address Addr = createInAllocaStructGEP(RetAI.getInAllocaFieldIndex());
-      Builder.CreateStore(SRetPtr.getPointer(), Addr);
+      Builder.CreateStore(SRetPtrVal, Addr);
     }
   }
 
@@ -3934,11 +3990,17 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
             V->getType()->isIntegerTy())
           V = Builder.CreateZExt(V, ArgInfo.getCoerceToType());
 
-        // If the argument doesn't match, perform a bitcast to coerce it.  This
-        // can happen due to trivial type mismatches.
+        // If the argument doesn't match, perform a bitcast or addrspacecast
+        // in case of pointers to coerce it.
+        // This can happen due to trivial type mismatches.
         if (FirstIRArg < IRFuncTy->getNumParams() &&
-            V->getType() != IRFuncTy->getParamType(FirstIRArg))
-          V = Builder.CreateBitCast(V, IRFuncTy->getParamType(FirstIRArg));
+            V->getType() != IRFuncTy->getParamType(FirstIRArg)) {
+          if (getContext().getLangOpts().SYCLIsDevice)
+            V = EmitAddrSpaceCast(V, IRFuncTy->getParamType(FirstIRArg));
+
+          if (V->getType() != IRFuncTy->getParamType(FirstIRArg))
+            V = Builder.CreateBitCast(V, IRFuncTy->getParamType(FirstIRArg));
+        }
 
         IRCallArgs[FirstIRArg] = V;
         break;

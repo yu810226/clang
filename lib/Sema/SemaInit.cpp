@@ -3598,11 +3598,16 @@ ResolveConstructorOverload(Sema &S, SourceLocation DeclLoc,
         (IsListInit && Args.size() == 1 && isa<InitListExpr>(Args[0]) &&
          hasCopyOrMoveCtorParam(S.Context, Info));
 
-    if (Info.ConstructorTmpl)
-      S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
-                                     /*ExplicitArgs*/ nullptr, Args,
-                                     CandidateSet, SuppressUserConversions);
-    else {
+    if (Info.ConstructorTmpl) {
+      if (S.getLangOpts().SYCLIsDevice)
+        S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
+                                       /*ExplicitArgs*/ nullptr, DestType, Args,
+                                       CandidateSet, SuppressUserConversions);
+      else
+        S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
+                                       /*ExplicitArgs*/ nullptr, Args,
+                                       CandidateSet, SuppressUserConversions);
+    } else {
       // C++ [over.match.copy]p1:
       //   - When initializing a temporary to be bound to the first parameter 
       //     of a constructor [for type T] that takes a reference to possibly
@@ -3613,10 +3618,16 @@ ResolveConstructorOverload(Sema &S, SourceLocation DeclLoc,
       bool AllowExplicitConv = AllowExplicit && !CopyInitializing && 
                                Args.size() == 1 &&
                                hasCopyOrMoveCtorParam(S.Context, Info);
-      S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl, Args,
-                             CandidateSet, SuppressUserConversions,
-                             /*PartialOverloading=*/false,
-                             /*AllowExplicit=*/AllowExplicitConv);
+      if (S.getLangOpts().SYCLIsDevice)
+        S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl, Args,
+                               CandidateSet, DestType, SuppressUserConversions,
+                               /*PartialOverloading=*/false,
+                               /*AllowExplicit=*/AllowExplicitConv);
+      else
+        S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl, Args,
+                               CandidateSet, SuppressUserConversions,
+                               /*PartialOverloading=*/false,
+                               /*AllowExplicit=*/AllowExplicitConv);
     }
   }
 
@@ -3766,7 +3777,7 @@ static void TryConstructorInitialization(Sema &S,
                                           CandidateSet, DestType, Ctors, Best,
                                           CopyInitialization, AllowExplicit,
                                           /*OnlyListConstructor=*/true,
-                                          IsListInit);
+                                          IsListInit, DestType);
   }
 
   // C++11 [over.match.list]p1:
@@ -3780,7 +3791,7 @@ static void TryConstructorInitialization(Sema &S,
                                         CandidateSet, DestType, Ctors, Best,
                                         CopyInitialization, AllowExplicit,
                                         /*OnlyListConstructors=*/false,
-                                        IsListInit);
+                                        IsListInit, DestType);
   }
   if (Result) {
     Sequence.SetOverloadFailure(IsListInit ?
@@ -4202,15 +4213,30 @@ static OverloadingResult TryRefInitWithConversionFunction(
 
       if (!Info.Constructor->isInvalidDecl() &&
           Info.Constructor->isConvertingConstructor(AllowExplicit)) {
-        if (Info.ConstructorTmpl)
-          S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
-                                         /*ExplicitArgs*/ nullptr,
-                                         Initializer, CandidateSet,
-                                         /*SuppressUserConversions=*/true);
-        else
-          S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl,
-                                 Initializer, CandidateSet,
-                                 /*SuppressUserConversions=*/true);
+        if (Info.ConstructorTmpl) {
+          if (S.getLangOpts().SYCLIsDevice) {
+            S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
+                                           /*ExplicitArgs*/ nullptr,
+                                           DestType,
+                                           Initializer, CandidateSet,
+                                           /*SuppressUserConversions=*/true);
+          } else {
+            S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
+                                           /*ExplicitArgs*/ nullptr,
+                                           Initializer, CandidateSet,
+                                           /*SuppressUserConversions=*/true);
+          }
+        } else {
+          if (S.getLangOpts().SYCLIsDevice) {
+            S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl,
+                                   Initializer, CandidateSet, DestType,
+                                   /*SuppressUserConversions=*/true);
+          } else {
+            S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl,
+                                   Initializer, CandidateSet,
+                                   /*SuppressUserConversions=*/true);
+          }
+        }
       }
     }
   }
@@ -4802,15 +4828,28 @@ static void TryUserDefinedConversion(Sema &S,
 
         if (!Info.Constructor->isInvalidDecl() &&
             Info.Constructor->isConvertingConstructor(AllowExplicit)) {
-          if (Info.ConstructorTmpl)
-            S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
-                                           /*ExplicitArgs*/ nullptr,
-                                           Initializer, CandidateSet,
-                                           /*SuppressUserConversions=*/true);
-          else
-            S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl,
-                                   Initializer, CandidateSet,
-                                   /*SuppressUserConversions=*/true);
+          if (Info.ConstructorTmpl) {
+            if (S.getLangOpts().SYCLIsDevice)
+              S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
+                                             /*ExplicitArgs*/ nullptr,
+                                             DestType,
+                                             Initializer, CandidateSet,
+                                             /*SuppressUserConversions=*/true);
+            else
+              S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
+                                             /*ExplicitArgs*/ nullptr,
+                                             Initializer, CandidateSet,
+                                             /*SuppressUserConversions=*/true);
+          } else {
+            if (S.getLangOpts().SYCLIsDevice)
+              S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl,
+                                     Initializer, CandidateSet, DestType,
+                                     /*SuppressUserConversions=*/true);
+            else
+              S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl,
+                                     Initializer, CandidateSet,
+                                     /*SuppressUserConversions=*/true);
+          }
         }
       }
     }
@@ -5434,6 +5473,28 @@ void InitializationSequence::InitializeFrom(Sema &S,
   }
 
   assert(S.getLangOpts().CPlusPlus);
+
+  // SYCL
+  //   Check if the pointer address spaces are compatible and they can be
+  //   converted
+  if (S.getLangOpts().SYCLIsDevice) {
+    QualType ptr1 = SourceType;
+    QualType ptr2 = DestType;
+
+    while (!ptr1.isNull() && !ptr2.isNull() &&
+           ptr1->isPointerType() && ptr2->isPointerType()) {
+      ptr1 = ptr1->getPointeeType();
+      ptr2 = ptr2->getPointeeType();
+
+      Qualifiers SrcQuals = ptr1.getQualifiers(),
+                 DestQuals = ptr2.getQualifiers();
+
+      if (!DestQuals.isAddressSpaceSupersetOf(SrcQuals)) {
+        SetFailed(FK_ConversionFailed);
+        return;
+      }
+    }
+  }
 
   //     - If the destination type is a (possibly cv-qualified) class type:
   if (DestType->isRecordType()) {

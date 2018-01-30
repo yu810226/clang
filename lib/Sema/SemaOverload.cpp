@@ -1059,6 +1059,12 @@ bool Sema::IsOverload(FunctionDecl *New, FunctionDecl *Old,
       isa<FunctionNoProtoType>(NewQType.getTypePtr()))
     return false;
 
+  // SYCL
+  //   Function overloading based on address space
+  if(Context.getLangOpts().SYCLIsDevice &&
+     OldQType.getAddressSpace() != NewQType.getAddressSpace())
+    return true;
+
   const FunctionProtoType *OldType = cast<FunctionProtoType>(OldQType);
   const FunctionProtoType *NewType = cast<FunctionProtoType>(NewQType);
 
@@ -3188,13 +3194,23 @@ IsInitializerListConstructorConversion(Sema &S, Expr *From, QualType ToType,
       // suppress conversions.
       bool SuppressUserConversions = isFirstArgumentCompatibleWithType(
           S.Context, Info.Constructor, ToType);
-      if (Info.ConstructorTmpl)
-        S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
-                                       /*ExplicitArgs*/ nullptr, From,
-                                       CandidateSet, SuppressUserConversions);
-      else
-        S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl, From,
-                               CandidateSet, SuppressUserConversions);
+      if (Info.ConstructorTmpl) {
+        if (S.getLangOpts().SYCLIsDevice)
+          S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
+                                         /*ExplicitArgs*/ nullptr, ToType, From,
+                                         CandidateSet, SuppressUserConversions);
+        else
+          S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
+                                         /*ExplicitArgs*/ nullptr, From,
+                                         CandidateSet, SuppressUserConversions);
+      } else {
+        if (S.getLangOpts().SYCLIsDevice)
+          S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl, From,
+                                 CandidateSet, ToType, SuppressUserConversions);
+        else
+          S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl, From,
+                                 CandidateSet, SuppressUserConversions);
+      }
     }
   }
 
@@ -3318,17 +3334,30 @@ IsUserDefinedConversion(Sema &S, Expr *From, QualType ToType,
                   S.Context, Info.Constructor, ToType);
             }
           }
-          if (Info.ConstructorTmpl)
-            S.AddTemplateOverloadCandidate(
-                Info.ConstructorTmpl, Info.FoundDecl,
-                /*ExplicitArgs*/ nullptr, llvm::makeArrayRef(Args, NumArgs),
-                CandidateSet, SuppressUserConversions);
-          else
+          if (Info.ConstructorTmpl) {
+            if (S.getLangOpts().SYCLIsDevice)
+              S.AddTemplateOverloadCandidate(
+                  Info.ConstructorTmpl, Info.FoundDecl,
+                  /*ExplicitArgs*/ nullptr, ToType,
+                  llvm::makeArrayRef(Args, NumArgs),
+                  CandidateSet, SuppressUserConversions);
+            else
+              S.AddTemplateOverloadCandidate(
+                  Info.ConstructorTmpl, Info.FoundDecl,
+                  /*ExplicitArgs*/ nullptr, llvm::makeArrayRef(Args, NumArgs),
+                  CandidateSet, SuppressUserConversions);
+          } else {
             // Allow one user-defined conversion when user specifies a
             // From->ToType conversion via an static cast (c-style, etc).
-            S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl,
-                                   llvm::makeArrayRef(Args, NumArgs),
-                                   CandidateSet, SuppressUserConversions);
+            if (S.getLangOpts().SYCLIsDevice)
+              S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl,
+                                     llvm::makeArrayRef(Args, NumArgs),
+                                     CandidateSet, ToType, SuppressUserConversions);
+            else
+              S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl,
+                                     llvm::makeArrayRef(Args, NumArgs),
+                                     CandidateSet, SuppressUserConversions);
+          }
         }
       }
     }
@@ -5015,6 +5044,10 @@ TryObjectArgumentInitialization(Sema &S, SourceLocation Loc, QualType FromType,
   unsigned Quals = isa<CXXDestructorDecl>(Method) ?
     Qualifiers::Const | Qualifiers::Volatile : Method->getTypeQualifiers();
   QualType ImplicitParamType =  S.Context.getCVRQualifiedType(ClassType, Quals);
+  if (S.getLangOpts().SYCLIsDevice) {
+      ImplicitParamType = S.Context.getAddrSpaceQualType(ImplicitParamType,
+                                          Method->getType().getAddressSpace());
+  }
 
   // Set up the conversion sequence as a "bad" conversion, to allow us
   // to exit early.
@@ -5892,6 +5925,172 @@ Sema::AddOverloadCandidate(FunctionDecl *Function,
                            DeclAccessPair FoundDecl,
                            ArrayRef<Expr *> Args,
                            OverloadCandidateSet &CandidateSet,
+                           QualType DestTy,
+                           bool SuppressUserConversions,
+                           bool PartialOverloading,
+                           bool AllowExplicit) {
+  const FunctionProtoType *Proto
+    = dyn_cast<FunctionProtoType>(Function->getType()->getAs<FunctionType>());
+  assert(Proto && "Functions without a prototype cannot be overloaded");
+  assert(!Function->getDescribedFunctionTemplate() &&
+         "Use AddTemplateOverloadCandidate for function templates");
+
+  if (CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(Function)) {
+    if (!isa<CXXConstructorDecl>(Method)) {
+      // If we get here, it's because we're calling a member function
+      // that is named without a member access expression (e.g.,
+      // "this->f") that was either written explicitly or created
+      // implicitly. This can happen with a qualified call to a member
+      // function, e.g., X::f(). We use an empty type for the implied
+      // object argument (C++ [over.call.func]p3), and the acting context
+      // is irrelevant.
+      AddMethodCandidate(Method, FoundDecl, Method->getParent(),
+                         DestTy, Expr::Classification::makeSimpleLValue(),
+                         Args, CandidateSet, SuppressUserConversions,
+                         PartialOverloading);
+      return;
+    }
+    // We treat a constructor like a non-member function, since its object
+    // argument doesn't participate in overload resolution.
+  }
+
+  if (!CandidateSet.isNewCandidate(Function))
+    return;
+
+  // C++ [over.match.oper]p3:
+  //   if no operand has a class type, only those non-member functions in the
+  //   lookup set that have a first parameter of type T1 or "reference to
+  //   (possibly cv-qualified) T1", when T1 is an enumeration type, or (if there
+  //   is a right operand) a second parameter of type T2 or "reference to
+  //   (possibly cv-qualified) T2", when T2 is an enumeration type, are
+  //   candidate functions.
+  if (CandidateSet.getKind() == OverloadCandidateSet::CSK_Operator &&
+      !IsAcceptableNonMemberOperatorCandidate(Context, Function, Args))
+    return;
+
+  // C++11 [class.copy]p11: [DR1402]
+  //   A defaulted move constructor that is defined as deleted is ignored by
+  //   overload resolution.
+  CXXConstructorDecl *Constructor = dyn_cast<CXXConstructorDecl>(Function);
+  if (Constructor && Constructor->isDefaulted() && Constructor->isDeleted() &&
+      Constructor->isMoveConstructor())
+    return;
+
+  // Overload resolution is always an unevaluated context.
+  EnterExpressionEvaluationContext Unevaluated(*this, Sema::Unevaluated);
+
+  // Add this candidate
+  OverloadCandidate &Candidate = CandidateSet.addCandidate(Args.size());
+  Candidate.FoundDecl = FoundDecl;
+  Candidate.Function = Function;
+  Candidate.Viable = true;
+  Candidate.IsSurrogate = false;
+  Candidate.IgnoreObjectArgument = false;
+  Candidate.ExplicitCallArguments = Args.size();
+
+  if (Constructor) {
+    // C++ [class.copy]p3:
+    //   A member function template is never instantiated to perform the copy
+    //   of a class object to an object of its class type.
+    QualType ClassType = Context.getTypeDeclType(Constructor->getParent());
+    if (Args.size() == 1 && Constructor->isSpecializationCopyingObject() &&
+        (Context.hasSameUnqualifiedType(ClassType, Args[0]->getType()) ||
+         IsDerivedFrom(Args[0]->getLocStart(), Args[0]->getType(),
+                       ClassType))) {
+      Candidate.Viable = false;
+      Candidate.FailureKind = ovl_fail_illegal_constructor;
+      return;
+    }
+  }
+
+  unsigned NumParams = Proto->getNumParams();
+
+  // (C++ 13.3.2p2): A candidate function having fewer than m
+  // parameters is viable only if it has an ellipsis in its parameter
+  // list (8.3.5).
+  if (TooManyArguments(NumParams, Args.size(), PartialOverloading) &&
+      !Proto->isVariadic()) {
+    Candidate.Viable = false;
+    Candidate.FailureKind = ovl_fail_too_many_arguments;
+    return;
+  }
+
+  // (C++ 13.3.2p2): A candidate function having more than m parameters
+  // is viable only if the (m+1)st parameter has a default argument
+  // (8.3.6). For the purposes of overload resolution, the
+  // parameter list is truncated on the right, so that there are
+  // exactly m parameters.
+  unsigned MinRequiredArgs = Function->getMinRequiredArguments();
+  if (Args.size() < MinRequiredArgs && !PartialOverloading) {
+    // Not enough arguments.
+    Candidate.Viable = false;
+    Candidate.FailureKind = ovl_fail_too_few_arguments;
+    return;
+  }
+
+  // (CUDA B.1): Check for invalid calls between targets.
+  if (getLangOpts().CUDA)
+    if (const FunctionDecl *Caller = dyn_cast<FunctionDecl>(CurContext))
+      // Skip the check for callers that are implicit members, because in this
+      // case we may not yet know what the member's target is; the target is
+      // inferred for the member automatically, based on the bases and fields of
+      // the class.
+      if (!Caller->isImplicit() && CheckCUDATarget(Caller, Function)) {
+        Candidate.Viable = false;
+        Candidate.FailureKind = ovl_fail_bad_target;
+        return;
+      }
+
+  // Determine the implicit conversion sequences for each of the
+  // arguments.
+  for (unsigned ArgIdx = 0; ArgIdx < Args.size(); ++ArgIdx) {
+    if (ArgIdx < NumParams) {
+      // (C++ 13.3.2p3): for F to be a viable function, there shall
+      // exist for each argument an implicit conversion sequence
+      // (13.3.3.1) that converts that argument to the corresponding
+      // parameter of F.
+      QualType ParamType = Proto->getParamType(ArgIdx);
+      Candidate.Conversions[ArgIdx]
+        = TryCopyInitialization(*this, Args[ArgIdx], ParamType,
+                                SuppressUserConversions,
+                                /*InOverloadResolution=*/true,
+                                /*AllowObjCWritebackConversion=*/
+                                  getLangOpts().ObjCAutoRefCount,
+                                AllowExplicit);
+      if (Candidate.Conversions[ArgIdx].isBad()) {
+        Candidate.Viable = false;
+        Candidate.FailureKind = ovl_fail_bad_conversion;
+        return;
+      }
+    } else {
+      // (C++ 13.3.2p2): For the purposes of overload resolution, any
+      // argument for which there is no corresponding parameter is
+      // considered to ""match the ellipsis" (C+ 13.3.3.1.3).
+      Candidate.Conversions[ArgIdx].setEllipsis();
+    }
+  }
+
+  if (EnableIfAttr *FailedAttr = CheckEnableIf(Function, Args)) {
+    Candidate.Viable = false;
+    Candidate.FailureKind = ovl_fail_enable_if;
+    Candidate.DeductionFailure.Data = FailedAttr;
+    return;
+  }
+}
+
+/// AddOverloadCandidate - Adds the given function to the set of
+/// candidate functions, using the given function call arguments.  If
+/// @p SuppressUserConversions, then don't allow user-defined
+/// conversions via constructors or conversion operators.
+///
+/// \param PartialOverloading true if we are performing "partial" overloading
+/// based on an incomplete set of function arguments. This feature is used by
+/// code completion.
+void
+Sema::AddOverloadCandidate(FunctionDecl *Function,
+                           DeclAccessPair FoundDecl,
+                           ArrayRef<Expr *> Args,
+                           OverloadCandidateSet &CandidateSet,
                            bool SuppressUserConversions,
                            bool PartialOverloading,
                            bool AllowExplicit,
@@ -6396,8 +6595,13 @@ void Sema::AddFunctionCandidates(const UnresolvedSetImpl &Fns,
           assert(cast<CXXMethodDecl>(FD)->isStatic());
           FunctionArgs = Args.slice(1);
         }
-        AddOverloadCandidate(FD, F.getPair(), FunctionArgs, CandidateSet,
-                             SuppressUserConversions, PartialOverloading);
+        if (getLangOpts().SYCLIsDevice)
+          AddOverloadCandidate(FD, F.getPair(), FunctionArgs, CandidateSet,
+                               Args[0]->getType(), SuppressUserConversions,
+                               PartialOverloading);
+        else
+          AddOverloadCandidate(FD, F.getPair(), FunctionArgs, CandidateSet,
+                               SuppressUserConversions, PartialOverloading);
       }
     } else {
       FunctionTemplateDecl *FunTmpl = cast<FunctionTemplateDecl>(D);
@@ -6417,10 +6621,18 @@ void Sema::AddFunctionCandidates(const UnresolvedSetImpl &Fns,
             Args.slice(1), CandidateSet, SuppressUserConversions,
             PartialOverloading);
       } else {
-        AddTemplateOverloadCandidate(FunTmpl, F.getPair(),
-                                     ExplicitTemplateArgs, Args,
-                                     CandidateSet, SuppressUserConversions,
-                                     PartialOverloading);
+        if (getLangOpts().SYCLIsDevice)
+          AddTemplateOverloadCandidate(FunTmpl, F.getPair(),
+                                       ExplicitTemplateArgs,
+                                       Args.empty()? QualType():
+                                       Args[0]->getType(), Args,
+                                       CandidateSet, SuppressUserConversions,
+                                       PartialOverloading);
+        else
+          AddTemplateOverloadCandidate(FunTmpl, F.getPair(),
+                                       ExplicitTemplateArgs, Args,
+                                       CandidateSet, SuppressUserConversions,
+                                       PartialOverloading)
       }
     }
   }
@@ -6662,6 +6874,55 @@ Sema::AddMethodTemplateCandidate(FunctionTemplateDecl *MethodTmpl,
                      ActingContext, ObjectType, ObjectClassification, Args,
                      CandidateSet, SuppressUserConversions, PartialOverloading,
                      Conversions);
+}
+
+/// \brief Add a C++ function template specialization as a candidate
+/// in the candidate set, using template argument deduction to produce
+/// an appropriate function template specialization.
+void
+Sema::AddTemplateOverloadCandidate(FunctionTemplateDecl *FunctionTemplate,
+                                   DeclAccessPair FoundDecl,
+                                 TemplateArgumentListInfo *ExplicitTemplateArgs,
+                                   QualType ObjectType,
+                                   ArrayRef<Expr *> Args,
+                                   OverloadCandidateSet& CandidateSet,
+                                   bool SuppressUserConversions,
+                                   bool PartialOverloading) {
+  if (!CandidateSet.isNewCandidate(FunctionTemplate))
+    return;
+
+  // C++ [over.match.funcs]p7:
+  //   In each case where a candidate is a function template, candidate
+  //   function template specializations are generated using template argument
+  //   deduction (14.8.3, 14.8.2). Those candidates are then handled as
+  //   candidate functions in the usual way.113) A given name can refer to one
+  //   or more function templates and also to a set of overloaded non-template
+  //   functions. In such a case, the candidate functions generated from each
+  //   function template are combined with the set of non-template candidate
+  //   functions.
+  TemplateDeductionInfo Info(CandidateSet.getLocation());
+  FunctionDecl *Specialization = nullptr;
+  if (TemplateDeductionResult Result
+        = DeduceTemplateArguments(FunctionTemplate, ExplicitTemplateArgs, Args,
+                                  Specialization, Info, PartialOverloading)) {
+    OverloadCandidate &Candidate = CandidateSet.addCandidate();
+    Candidate.FoundDecl = FoundDecl;
+    Candidate.Function = FunctionTemplate->getTemplatedDecl();
+    Candidate.Viable = false;
+    Candidate.FailureKind = ovl_fail_bad_deduction;
+    Candidate.IsSurrogate = false;
+    Candidate.IgnoreObjectArgument = false;
+    Candidate.ExplicitCallArguments = Args.size();
+    Candidate.DeductionFailure = MakeDeductionFailureInfo(Context, Result,
+                                                          Info);
+    return;
+  }
+
+  // Add the function template specialization produced by template argument
+  // deduction as a candidate.
+  assert(Specialization && "Missing function template specialization?");
+  AddOverloadCandidate(Specialization, FoundDecl, Args, CandidateSet,
+                       ObjectType, SuppressUserConversions, PartialOverloading);
 }
 
 /// \brief Add a C++ function template specialization as a candidate
@@ -8844,12 +9105,22 @@ Sema::AddArgumentDependentLookupCandidates(DeclarationName Name,
       if (ExplicitTemplateArgs)
         continue;
 
-      AddOverloadCandidate(FD, FoundDecl, Args, CandidateSet, false,
-                           PartialOverloading);
-    } else
-      AddTemplateOverloadCandidate(cast<FunctionTemplateDecl>(*I),
-                                   FoundDecl, ExplicitTemplateArgs,
-                                   Args, CandidateSet, PartialOverloading);
+      if (getLangOpts().SYCLIsDevice)
+        AddOverloadCandidate(FD, FoundDecl, Args, CandidateSet, QualType(), false,
+                             PartialOverloading);
+      else
+        AddOverloadCandidate(FD, FoundDecl, Args, CandidateSet, false,
+                             PartialOverloading);
+    } else {
+      if (getLangOpts().SYCLIsDevice)
+        AddTemplateOverloadCandidate(cast<FunctionTemplateDecl>(*I),
+                                     FoundDecl, ExplicitTemplateArgs, QualType(),
+                                     Args, CandidateSet, PartialOverloading);
+      else
+        AddTemplateOverloadCandidate(cast<FunctionTemplateDecl>(*I),
+                                     FoundDecl, ExplicitTemplateArgs,
+                                     Args, CandidateSet, PartialOverloading);
+    }
   }
 }
 
@@ -9050,6 +9321,18 @@ bool clang::isBetterOverloadCandidate(
                                          Cand1.ExplicitCallArguments,
                                          Cand2.ExplicitCallArguments))
       return BetterTemplate == Cand1.Function->getPrimaryTemplate();
+  }
+
+  // SYCL
+  //   If the old candidate is in address space 0 and the new one
+  //   is in the named address spaces, it means that the new one is a better
+  //   candidate
+  if (S.getASTContext().getLangOpts().SYCLIsDevice &&
+      Cand1.Function && Cand2.Function) {
+    unsigned int candAS1 = Cand1.Function->getType().getAddressSpace();
+    unsigned int candAS2 = Cand2.Function->getType().getAddressSpace();
+    if (candAS2 == 0 && (candAS1 != 4 || candAS1 == 0))
+      return true;
   }
 
   // FIXME: Work around a defect in the C++17 inheriting constructor wording.
@@ -11459,6 +11742,11 @@ static void AddOverloadedCallCandidate(Sema &S,
     if (!dyn_cast<FunctionProtoType>(Func->getType()->getAs<FunctionType>()))
       return;
 
+    if (S.getLangOpts().SYCLIsDevice)
+    S.AddOverloadCandidate(Func, FoundDecl, Args, CandidateSet, QualType(),
+                           /*SuppressUsedConversions=*/false,
+                           PartialOverloading);
+    else
     S.AddOverloadCandidate(Func, FoundDecl, Args, CandidateSet,
                            /*SuppressUsedConversions=*/false,
                            PartialOverloading);
@@ -11467,10 +11755,17 @@ static void AddOverloadedCallCandidate(Sema &S,
 
   if (FunctionTemplateDecl *FuncTemplate
       = dyn_cast<FunctionTemplateDecl>(Callee)) {
-    S.AddTemplateOverloadCandidate(FuncTemplate, FoundDecl,
-                                   ExplicitTemplateArgs, Args, CandidateSet,
-                                   /*SuppressUsedConversions=*/false,
-                                   PartialOverloading);
+    if (S.getLangOpts().SYCLIsDevice)
+      S.AddTemplateOverloadCandidate(FuncTemplate, FoundDecl,
+                                     ExplicitTemplateArgs, QualType(),
+                                     Args, CandidateSet,
+                                     /*SuppressUsedConversions=*/false,
+                                     PartialOverloading);
+    else
+      S.AddTemplateOverloadCandidate(FuncTemplate, FoundDecl,
+                                     ExplicitTemplateArgs, Args, CandidateSet,
+                                     /*SuppressUsedConversions=*/false,
+                                     PartialOverloading);
     return;
   }
 
@@ -12748,22 +13043,44 @@ Sema::BuildCallToMemberFunction(Scope *S, Expr *MemExprE,
 
       // Microsoft supports direct constructor calls.
       if (getLangOpts().MicrosoftExt && isa<CXXConstructorDecl>(Func)) {
-        AddOverloadCandidate(cast<CXXConstructorDecl>(Func), I.getPair(),
-                             Args, CandidateSet);
+        if (getLangOpts().SYCLIsDevice)
+          AddOverloadCandidate(cast<CXXConstructorDecl>(Func), I.getPair(),
+                               Args, CandidateSet, UnresExpr->isArrow()?
+                               ObjectType->getPointeeType():
+                               ObjectType);
+        else
+          AddOverloadCandidate(cast<CXXConstructorDecl>(Func), I.getPair(),
+                               Args, CandidateSet);
       } else if ((Method = dyn_cast<CXXMethodDecl>(Func))) {
         // If explicit template arguments were provided, we can't call a
         // non-template member function.
         if (TemplateArgs)
           continue;
 
-        AddMethodCandidate(Method, I.getPair(), ActingDC, ObjectType,
-                           ObjectClassification, Args, CandidateSet,
-                           /*SuppressUserConversions=*/false);
+        if (getLangOpts().SYCLIsDevice) {
+          AddMethodCandidate(Method, I.getPair(), ActingDC,
+                             UnresExpr->isArrow()?
+                             ObjectType->getPointeeType():
+                             ObjectType,
+                             ObjectClassification, Args, CandidateSet,
+                             /*SuppressUserConversions=*/false);
+        } else {
+          AddMethodCandidate(Method, I.getPair(), ActingDC, ObjectType,
+                             ObjectClassification, Args, CandidateSet,
+                             /*SuppressUserConversions=*/false);
+        }
       } else {
-        AddMethodTemplateCandidate(
-            cast<FunctionTemplateDecl>(Func), I.getPair(), ActingDC,
-            TemplateArgs, ObjectType, ObjectClassification, Args, CandidateSet,
-            /*SuppressUsedConversions=*/false);
+        if (getLangOpts().SYCLIsDevice)
+          AddMethodTemplateCandidate(
+              cast<FunctionTemplateDecl>(Func), I.getPair(), ActingDC,
+              TemplateArgs, UnresExpr->isArrow()? ObjectType->getPointeeType():
+              ObjectType, ObjectClassification, Args, CandidateSet,
+              /*SuppressUsedConversions=*/false);
+        else
+          AddMethodTemplateCandidate(
+              cast<FunctionTemplateDecl>(Func), I.getPair(), ActingDC,
+              TemplateArgs, ObjectType, ObjectClassification, Args, CandidateSet,
+              /*SuppressUsedConversions=*/false);
       }
     }
 

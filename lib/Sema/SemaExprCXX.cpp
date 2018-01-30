@@ -3206,7 +3206,10 @@ Sema::ActOnCXXDelete(SourceLocation StartLoc, bool UseGlobal,
     QualType Pointee = Type->getAs<PointerType>()->getPointeeType();
     QualType PointeeElem = Context.getBaseElementType(Pointee);
 
-    if (Pointee.getAddressSpace() != LangAS::Default)
+    // llvm version 7.0
+    //if (Pointee.getAddressSpace() != LangAS::Default)
+    if (unsigned AddressSpace = Pointee.getAddressSpace()
+         && !getLangOpts().SYCLIsDevice)
       return Diag(Ex.get()->getLocStart(),
                   diag::err_address_space_qualified_delete)
                << Pointee.getUnqualifiedType()

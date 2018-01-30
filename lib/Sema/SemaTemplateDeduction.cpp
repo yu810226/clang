@@ -981,7 +981,8 @@ DeduceTemplateArguments(Sema &S,
 /// \brief Determine whether the parameter has qualifiers that are either
 /// inconsistent with or a superset of the argument's qualifiers.
 static bool hasInconsistentOrSupersetQualifiersOf(QualType ParamType,
-                                                  QualType ArgType) {
+                                                  QualType ArgType,
+                                                  Sema &S) {
   Qualifiers ParamQs = ParamType.getQualifiers();
   Qualifiers ArgQs = ArgType.getQualifiers();
 
@@ -994,9 +995,16 @@ static bool hasInconsistentOrSupersetQualifiersOf(QualType ParamType,
     return true;
 
   // Mismatched (but not missing) address spaces.
-  if (ParamQs.getAddressSpace() != ArgQs.getAddressSpace() &&
-      ParamQs.hasAddressSpace())
-    return true;
+  if (S.Context.getLangOpts().SYCLIsDevice) {
+    if (ParamQs.getAddressSpace() != ArgQs.getAddressSpace() &&
+        ParamQs.hasAddressSpace() &&
+        !ParamQs.isAddressSpaceSupersetOf(ArgQs))
+      return true;
+  } else {
+    if (ParamQs.getAddressSpace() != ArgQs.getAddressSpace() &&
+        ParamQs.hasAddressSpace())
+      return true;
+  }
 
   // Mismatched (but not missing) Objective-C lifetime qualifiers.
   if (ParamQs.getObjCLifetime() != ArgQs.getObjCLifetime() &&
@@ -1225,7 +1233,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
     // The argument type can not be less qualified than the parameter
     // type.
     if (!(TDF & TDF_IgnoreQualifiers) &&
-        hasInconsistentOrSupersetQualifiersOf(Param, Arg)) {
+        hasInconsistentOrSupersetQualifiersOf(Param, Arg, S)) {
       Info.Param = cast<TemplateTypeParmDecl>(TemplateParams->getParam(Index));
       Info.FirstArg = TemplateArgument(Param);
       Info.SecondArg = TemplateArgument(Arg);
@@ -1305,7 +1313,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
   CanQualType CanArg = S.Context.getCanonicalType(Arg);
   if (!(TDF & TDF_IgnoreQualifiers)) {
     if (TDF & TDF_ParamWithReferenceType) {
-      if (hasInconsistentOrSupersetQualifiersOf(Param, Arg))
+      if (hasInconsistentOrSupersetQualifiersOf(Param, Arg, S))
         return Sema::TDK_NonDeducedMismatch;
     } else if (!IsPossiblyOpaquelyQualifiedType(Param)) {
       if (Param.getCVRQualifiers() != Arg.getCVRQualifiers())
@@ -1468,6 +1476,18 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
 
     //     type [i]
     case Type::DependentSizedArray: {
+      // SYCL C++
+      //   If template parameter is not qualified with address space,
+      //   use argument address space to complete array size deduction.
+      if (S.Context.getLangOpts().SYCLIsDevice &&
+          (TDF & TDF_ParamWithReferenceType) &&
+          !Param.hasAddressSpace() &&
+          Arg.hasAddressSpace()) {
+        Qualifiers quals = Param.getQualifiers();
+        quals.setAddressSpace(Arg.getAddressSpace());
+        Param = S.Context.getQualifiedType(Param.getUnqualifiedType(), quals);
+      }
+
       const ArrayType *ArrayArg = S.Context.getAsArrayType(Arg);
       if (!ArrayArg)
         return Sema::TDK_NonDeducedMismatch;

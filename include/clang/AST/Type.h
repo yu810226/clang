@@ -488,7 +488,15 @@ public:
         // Otherwise in OpenCLC v2.0 s6.5.5: every address space except
         // for __constant can be used as __generic.
         (getAddressSpace() == LangAS::opencl_generic &&
-         other.getAddressSpace() != LangAS::opencl_constant);
+         other.getAddressSpace() != LangAS::opencl_constant) ||
+        // Otherwise in SYCL, every address except for __constant can be
+        // used as __generic or 0
+        ((getAddressSpace() == 4 || getAddressSpace() == 0) &&
+        (other.getAddressSpace() == 0 ||
+         other.getAddressSpace() == 1 ||
+         other.getAddressSpace() == 2 ||
+         other.getAddressSpace() == 3 ||
+         other.getAddressSpace() == 4));
   }
 
   /// Determines if these qualifiers compatibly include another set.
@@ -1054,6 +1062,9 @@ public:
   void Profile(llvm::FoldingSetNodeID &ID) const {
     ID.AddPointer(getAsOpaquePtr());
   }
+
+  /// hasAddressSpace - Return wheather address space was set.
+  inline bool hasAddressSpace() const;
 
   /// Return the address space of this type.
   inline LangAS getAddressSpace() const;
@@ -5839,6 +5850,11 @@ inline void QualType::removeLocalCVRQualifiers(unsigned Mask) {
 /// Return the address space of this type.
 inline LangAS QualType::getAddressSpace() const {
   return getQualifiers().getAddressSpace();
+}
+
+/// hasAddressSpace - Return whether address space was set.
+inline bool QualType::hasAddressSpace() const {
+  return getQualifiers().hasAddressSpace();
 }
 
 /// Return the gc attribute of this type.
