@@ -1327,7 +1327,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
 
     //     type [i]
     case Type::DependentSizedArray: {
-      // SYCL C++
+      // SYCL
       //   If template parameter is not qualified with address space,
       //   use argument address space to complete array size deduction.
       if (S.Context.getLangOpts().SYCLIsDevice &&
@@ -2709,6 +2709,15 @@ CheckOriginalCallArgDeduction(Sema &S, Sema::OriginalCallArg OriginalArg,
       AQuals.setObjCLifetime(DeducedAQuals.getObjCLifetime());
     }
 
+    // SYCL
+    //   The generic address space can be implicitly added to type
+    //   during deduction, this address space can be ignored
+    if (S.getLangOpts().SYCLIsDevice &&
+        (DeducedAQuals.getAddressSpace() == 4 ||
+         DeducedAQuals.getAddressSpace() == 0) &&
+        AQuals.getAddressSpace() != 4)
+      DeducedAQuals.setAddressSpace(AQuals.getAddressSpace());
+
     if (AQuals == DeducedAQuals) {
       // Qualifiers match; there's nothing to do.
     } else if (!DeducedAQuals.compatiblyIncludes(AQuals)) {
@@ -3149,13 +3158,28 @@ static bool AdjustFunctionParmAndArgTypesForDeduction(Sema &S,
       ArgType = Arg->getType();
     }
 
+    // SYCL
+    //   Ignore address space to check if lvalue can be used instead of rvalue
+    QualType ParamTypeQAS = ParamType;
+    if (S.Context.getLangOpts().SYCLIsDevice) {
+      Qualifiers PointeeQs = ParamType.getQualifiers();
+      if (PointeeQs.getAddressSpace() == 4 ||
+          PointeeQs.getAddressSpace() == 0 ||
+          PointeeQs.getAddressSpace() == ArgType.getAddressSpace()) {
+        PointeeQs.removeAddressSpace();
+        ParamTypeQAS = S.Context.getQualifiedType(
+                                              ParamType.getUnqualifiedType(),
+                                              PointeeQs);
+      }
+    }
+
     // C++0x [temp.deduct.call]p3:
     //   If P is an rvalue reference to a cv-unqualified template
     //   parameter and the argument is an lvalue, the type "lvalue
     //   reference to A" is used in place of A for type deduction.
     if (ParamRefType->isRValueReferenceType() &&
-        !ParamType.getQualifiers() &&
-        isa<TemplateTypeParmType>(ParamType) &&
+        !ParamTypeQAS.getQualifiers() &&
+        isa<TemplateTypeParmType>(ParamTypeQAS) &&
         Arg->isLValue())
       ArgType = S.Context.getLValueReferenceType(ArgType);
   } else {

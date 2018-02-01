@@ -3247,7 +3247,7 @@ static ExprResult BuildCXXCastArgument(Sema &S,
 ExprResult
 Sema::PerformImplicitConversion(Expr *From, QualType ToType,
                                 const ImplicitConversionSequence &ICS,
-                                AssignmentAction Action, 
+                                AssignmentAction Action,
                                 CheckedConversionKind CCK) {
   switch (ICS.getKind()) {
   case ImplicitConversionSequence::StandardConversion: {
@@ -3392,6 +3392,34 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
   if (const AtomicType *ToAtomic = ToType->getAs<AtomicType>()) {
     ToAtomicType = ToType;
     ToType = ToAtomic->getValueType();
+  }
+
+  // SYCL
+  //   Implicit type conversion from the named address space to
+  //   the generic address space.
+  QualType LHSType = Context.getCanonicalType(ToType).getUnqualifiedType();
+  QualType RHSType = Context.getCanonicalType(FromType).getUnqualifiedType();
+  bool addressSpaceConversion = false;
+  if (Context.getLangOpts().SYCLIsDevice &&
+      isa<PointerType>(LHSType) && isa<PointerType>(RHSType)) {
+    unsigned AddrSpaceL = LHSType->getPointeeType().getAddressSpace();
+    unsigned AddrSpaceR = RHSType->getPointeeType().getAddressSpace();
+    addressSpaceConversion = AddrSpaceL != AddrSpaceR;
+    if ((AddrSpaceL == 0 && AddrSpaceR == 4) ||
+        (AddrSpaceL == 4 && AddrSpaceR == 0)) {
+      addressSpaceConversion = false;
+    }
+  }
+
+  if (addressSpaceConversion) {
+    assert((LHSType->getPointeeType().getAddressSpace() == 4 ||
+           LHSType->getPointeeType().getAddressSpace() == 0)
+           && "LHS pointer is not in the generic address space");
+    assert(RHSType->getPointeeType().getAddressSpace() != 2 &&
+           "Constant to generic address space conversion is not allowed");
+
+    From = ImpCastExprToType(From, ToType, CK_AddressSpaceConversion,
+                             VK_RValue, /*BasePath=*/nullptr, CCK).get();
   }
 
   QualType InitialFromType = FromType;

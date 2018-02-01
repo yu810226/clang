@@ -1770,7 +1770,8 @@ BuildFieldReferenceExpr(Sema &S, Expr *BaseExpr, bool IsArrow,
     Qualifiers MemberQuals
     = S.Context.getCanonicalType(MemberType).getQualifiers();
 
-    assert(!MemberQuals.hasAddressSpace());
+    assert(!MemberQuals.hasAddressSpace() ||
+           S.Context.getLangOpts().SYCLIsDevice);
 
 
     Qualifiers Combined = BaseQuals + MemberQuals;
