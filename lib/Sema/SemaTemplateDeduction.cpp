@@ -1055,6 +1055,22 @@ static unsigned getFirstInnerIndex(FunctionTemplateDecl *FTD) {
 }
 
 /// Determine whether a type denotes a forwarding reference.
+static bool isForwardingReference(QualType Param, unsigned FirstInnerIndex,
+                                  QualType ParamTypeQAS) {
+  // C++1z [temp.deduct.call]p3:
+  //   A forwarding reference is an rvalue reference to a cv-unqualified
+  //   template parameter that does not represent a template parameter of a
+  //   class template.
+  if (auto *ParamRef = Param->getAs<RValueReferenceType>()) {
+    if (ParamTypeQAS.getQualifiers())
+      return false;
+    auto *TypeParm = ParamTypeQAS->getAs<TemplateTypeParmType>();
+    return TypeParm && TypeParm->getIndex() >= FirstInnerIndex;
+  }
+  return false;
+}
+
+/// Determine whether a type denotes a forwarding reference.
 static bool isForwardingReference(QualType Param, unsigned FirstInnerIndex) {
   // C++1z [temp.deduct.call]p3:
   //   A forwarding reference is an rvalue reference to a cv-unqualified
@@ -1476,7 +1492,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
 
     //     type [i]
     case Type::DependentSizedArray: {
-      // SYCL C++
+      // SYCL
       //   If template parameter is not qualified with address space,
       //   use argument address space to complete array size deduction.
       if (S.Context.getLangOpts().SYCLIsDevice &&
@@ -3056,6 +3072,15 @@ CheckOriginalCallArgDeduction(Sema &S, TemplateDeductionInfo &Info,
       AQuals.setObjCLifetime(DeducedAQuals.getObjCLifetime());
     }
 
+    // SYCL
+    //   The generic address space can be implicitly added to type
+    //   during deduction, this address space can be ignored
+    if (S.getLangOpts().SYCLIsDevice &&
+        (DeducedAQuals.getAddressSpace() == 4 ||
+         DeducedAQuals.getAddressSpace() == 0) &&
+        AQuals.getAddressSpace() != 4)
+      DeducedAQuals.setAddressSpace(AQuals.getAddressSpace());
+
     if (AQuals == DeducedAQuals) {
       // Qualifiers match; there's nothing to do.
     } else if (!DeducedAQuals.compatiblyIncludes(AQuals)) {
@@ -3449,11 +3474,26 @@ static bool AdjustFunctionParmAndArgTypesForDeduction(
       ArgType = Arg->getType();
     }
 
+    // SYCL
+    //   Ignore address space to check if lvalue can be used instead of rvalue
+    QualType ParamTypeQAS = ParamType;
+    if (S.Context.getLangOpts().SYCLIsDevice) {
+      Qualifiers PointeeQs = ParamType.getQualifiers();
+      if (PointeeQs.getAddressSpace() == 4 ||
+          PointeeQs.getAddressSpace() == 0 ||
+          PointeeQs.getAddressSpace() == ArgType.getAddressSpace()) {
+        PointeeQs.removeAddressSpace();
+        ParamTypeQAS = S.Context.getQualifiedType(
+                                              ParamType.getUnqualifiedType(),
+                                              PointeeQs);
+      }
+    }
+
     // C++1z [temp.deduct.call]p3:
     //   If P is a forwarding reference and the argument is an lvalue, the type
     //   "lvalue reference to A" is used in place of A for type deduction.
-    if (isForwardingReference(QualType(ParamRefType, 0), FirstInnerIndex) &&
-        Arg->isLValue())
+    if (isForwardingReference(QualType(ParamRefType, 0), FirstInnerIndex,
+                              ParamTypeQAS) && Arg->isLValue())
       ArgType = S.Context.getLValueReferenceType(ArgType);
   } else {
     // C++ [temp.deduct.call]p2:

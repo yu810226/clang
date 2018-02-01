@@ -2245,17 +2245,18 @@ void CXXNameMangler::mangleQualifiers(Qualifiers Quals, const DependentAddressSp
     } else {
       switch (AS) {
       default: llvm_unreachable("Not a language specific address space");
-      //  <OpenCL-addrspace> ::= "CL" [ "global" | "local" | "constant" |
-      //                                "private"| "generic" ]
-      case LangAS::opencl_global:   ASString = "CLglobal";   break;
-      //case 1:   ASString = "CLglobal";   break;
-      case LangAS::opencl_local:    ASString = "CLlocal";    break;
-      //case 3:    ASString = "CLlocal";    break;
-      case LangAS::opencl_constant: ASString = "CLconstant"; break;
-      //case 2:    ASString = "CLconstant"; break;
+      //  <OpenCL-addrspace> ::= "CL" [ "global" | "local" | "constant" ]
+      case LangAS::opencl_global:
+      //ASString = "CLglobal";   break;
+      case 1:   ASString = "CLglobal";   break;
+      case LangAS::opencl_local:
+      //ASString = "CLlocal";    break;
+      case 3:    ASString = "CLlocal";    break;
+      case LangAS::opencl_constant:
+      //ASString = "CLconstant"; break;
+      case 2:    ASString = "CLconstant"; break;
       case LangAS::opencl_private:  ASString = "CLprivate";  break;
       case LangAS::opencl_generic:  ASString = "CLgeneric";  break;
->>>>>>> Add address space support for SYCL kernel
       //  <CUDA-addrspace> ::= "CU" [ "device" | "constant" | "shared" ]
       case LangAS::cuda_device:     ASString = "CUdevice";   break;
       case LangAS::cuda_constant:   ASString = "CUconstant"; break;

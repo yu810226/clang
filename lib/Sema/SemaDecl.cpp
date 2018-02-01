@@ -12181,10 +12181,11 @@ ParmVarDecl *Sema::CheckParameter(DeclContext *DC, SourceLocation StartLoc,
   // Since all parameters have automatic store duration, they can not have
   // an address space.
   if (T.getAddressSpace() != LangAS::Default &&
-      // OpenCL allows function arguments declared to be an array of a type
-      // to be qualified with an address space.
-      !(getLangOpts().OpenCL &&
-        (T->isArrayType() || T.getAddressSpace() == LangAS::opencl_private))) {
+      // OpenCL and SYCL allows function arguments declared to be an array of
+      // a type to be qualified with an address space.
+      !((getLangOpts().OpenCL || getLangOpts().SYCLIsDevice) &&
+        (T->isArrayType() || T.getAddressSpace() ==
+         (LangAS::opencl_private || 0 )))) {
     Diag(NameLoc, diag::err_arg_with_address_space);
     New->setInvalidDecl();
   }

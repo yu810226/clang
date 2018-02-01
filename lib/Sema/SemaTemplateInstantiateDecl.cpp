@@ -3057,10 +3057,24 @@ Decl *TemplateDeclInstantiator::VisitVarTemplateSpecializationDecl(
     return nullptr;
   }
 
+  QualType type = DI->getType();
+
+  // SYCL
+  //   The variable template specializations can be qualified with
+  //   address space. This address space can be dropped during substitution
+  //   and it needs to be restored.
+  if (SemaRef.Context.getLangOpts().SYCLIsDevice &&
+      VarTemplate->getTemplatedDecl()->getType().hasAddressSpace() &&
+      !type.hasAddressSpace()) {
+    type = SemaRef.Context.getAddrSpaceQualType(type,
+                 VarTemplate->getTemplatedDecl()->getType().getAddressSpace());
+    DI->overrideType(type);
+  }
+
   // Build the instantiated declaration
   VarTemplateSpecializationDecl *Var = VarTemplateSpecializationDecl::Create(
       SemaRef.Context, Owner, D->getInnerLocStart(), D->getLocation(),
-      VarTemplate, DI->getType(), DI, D->getStorageClass(), Converted);
+      VarTemplate, type, DI, D->getStorageClass(), Converted);
   Var->setTemplateArgsInfo(TemplateArgsInfo);
   if (InsertPos)
     VarTemplate->AddSpecialization(Var, InsertPos);
@@ -4056,8 +4070,20 @@ VarTemplateSpecializationDecl *Sema::CompleteVarTemplateSpecializationDecl(
   if (!DI)
     return nullptr;
 
+  QualType type = DI->getType();
+  // SYCL
+  //   The variable template specializations can be qualified with
+  //   address space. This address space cab be dropped during substitution
+  //   and it needs to be restored.
+  if (Context.getLangOpts().SYCLIsDevice &&
+      VarSpec->getType().hasAddressSpace() &&
+      !type.hasAddressSpace()) {
+    type = Context.getAddrSpaceQualType(type,
+                                        VarSpec->getType().getAddressSpace());
+  }
+
   // Update the type of this variable template specialization.
-  VarSpec->setType(DI->getType());
+  VarSpec->setType(type);
 
   // Convert the declaration into a definition now.
   VarSpec->setCompleteDefinition();

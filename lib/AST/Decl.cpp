@@ -1567,6 +1567,15 @@ void NamedDecl::printQualifiedName(raw_ostream &OS,
     OS << *this;
   else
     OS << "(anonymous)";
+
+  if (getASTContext().getLangOpts().SYCLIsDevice)
+    if (const ClassTemplateSpecializationDecl *Spec =
+            dyn_cast<ClassTemplateSpecializationDecl>(this)) {
+      const TemplateArgumentList &TemplateArgs = Spec->getTemplateArgs();
+      TemplateSpecializationType::PrintTemplateArgumentList(
+          OS, TemplateArgs.data(), TemplateArgs.size(), P);
+    }
+
 }
 
 void NamedDecl::getNameForDiagnostic(raw_ostream &OS,
