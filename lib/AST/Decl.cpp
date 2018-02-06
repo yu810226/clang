@@ -1491,7 +1491,7 @@ void NamedDecl::printQualifiedName(raw_ostream &OS,
             dyn_cast<ClassTemplateSpecializationDecl>(this)) {
       const TemplateArgumentList &TemplateArgs = Spec->getTemplateArgs();
       TemplateSpecializationType::PrintTemplateArgumentList(
-          OS, TemplateArgs.data(), TemplateArgs.size(), P);
+          OS, TemplateArgs.asArray(), P);
     }
 
 }
