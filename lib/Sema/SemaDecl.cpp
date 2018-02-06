@@ -10438,6 +10438,10 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
 
   Expr *Init = var->getInit();
   bool IsGlobal = GlobalStorage && !var->isStaticLocal();
+  bool IsNonProgramScopeGlobalMem =
+      getLangOpts().SYCLIsDevice &&
+      type.getAddressSpace() == 1 &&
+      (!var->isFileVarDecl() || var->isStaticDataMember());
   QualType baseType = Context.getBaseElementType(type);
 
   if (!var->getDeclContext()->isDependentContext() &&
@@ -10455,27 +10459,63 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
           << Init->getSourceRange();
     }
 
-    if (var->isConstexpr()) {
-      SmallVector<PartialDiagnosticAt, 8> Notes;
-      if (!var->evaluateValue(Notes) || !var->isInitICE()) {
-        SourceLocation DiagLoc = var->getLocation();
-        // If the note doesn't add any useful information other than a source
-        // location, fold it into the primary diagnostic.
-        if (Notes.size() == 1 && Notes[0].second.getDiagID() ==
-              diag::note_invalid_subexpr_in_const_expr) {
-          DiagLoc = Notes[0].first;
-          Notes.clear();
-        }
-        Diag(DiagLoc, diag::err_constexpr_var_requires_const_init)
-          << var << Init->getSourceRange();
-        for (unsigned I = 0, N = Notes.size(); I != N; ++I)
-          Diag(Notes[I].first, Notes[I].second);
+    if (getLangOpts().SYCLIsDevice) {
+      bool NonConstexprTrivialInit = false;
+      if (!var->isConstexpr() && IsNonProgramScopeGlobalMem &&
+          baseType->isRecordType() && isa<CXXConstructExpr>(Init)) {
+        auto CD = cast<CXXConstructExpr>(Init)->getConstructor();
+        if (CD->isTrivial() && CD->isDefaultConstructor())
+          NonConstexprTrivialInit = true;
       }
-    } else if (var->isUsableInConstantExpressions(Context)) {
-      // Check whether the initializer of a const variable of integral or
-      // enumeration type is an ICE now, since we can't tell whether it was
-      // initialized by a constant expression if we check later.
-      var->checkInitIsICE();
+
+      if (var->isConstexpr() ||
+          (getLangOpts().SYCLIsDevice &&
+          (type.getAddressSpace() == 2 ||
+           IsNonProgramScopeGlobalMem))) {
+        SmallVector<PartialDiagnosticAt, 8> Notes;
+        if (!NonConstexprTrivialInit && (!var->evaluateValue(Notes) ||
+                                         !var->isInitICE())) {
+          SourceLocation DiagLoc = var->getLocation();
+          // If the note doesn't add any useful information other than a source
+          // location, fold it into the primary diagnostic.
+          if (Notes.size() == 1 && Notes[0].second.getDiagID() ==
+              diag::note_invalid_subexpr_in_const_expr) {
+            DiagLoc = Notes[0].first;
+            Notes.clear();
+          }
+
+          for (unsigned I = 0, N = Notes.size(); I != N; ++I)
+            Diag(Notes[I].first, Notes[I].second);
+        }
+      } else if (var->isUsableInConstantExpressions(Context)) {
+        // Check whether the initializer of a const variable of integral or
+        // enumeration type is an ICE now, since we can't tell whether it was
+        // initialized by a constant expression if we check later.
+        var->checkInitIsICE();
+      }
+    } else {
+      if (var->isConstexpr()) {
+        SmallVector<PartialDiagnosticAt, 8> Notes;
+        if (!var->evaluateValue(Notes) || !var->isInitICE()) {
+          SourceLocation DiagLoc = var->getLocation();
+          // If the note doesn't add any useful information other than a source
+          // location, fold it into the primary diagnostic.
+          if (Notes.size() == 1 && Notes[0].second.getDiagID() ==
+                diag::note_invalid_subexpr_in_const_expr) {
+            DiagLoc = Notes[0].first;
+            Notes.clear();
+          }
+          Diag(DiagLoc, diag::err_constexpr_var_requires_const_init)
+            << var << Init->getSourceRange();
+          for (unsigned I = 0, N = Notes.size(); I != N; ++I)
+            Diag(Notes[I].first, Notes[I].second);
+        }
+      } else if (var->isUsableInConstantExpressions(Context)) {
+        // Check whether the initializer of a const variable of integral or
+        // enumeration type is an ICE now, since we can't tell whether it was
+        // initialized by a constant expression if we check later.
+        var->checkInitIsICE();
+      }
     }
   }
 
@@ -11004,35 +11044,46 @@ ParmVarDecl *Sema::CheckParameter(DeclContext *DC, SourceLocation StartLoc,
     T = Context.getLifetimeQualifiedType(T, lifetime);
   }
 
+  Qualifiers TQs =  T.getQualifiers();
+  QualType TAS = T;
+
+  if (getLangOpts().SYCLIsDevice && !T->isArrayType())
+    if (T.getAddressSpace() != 0) {
+      llvm::errs()<< "name: " << Name->getName().str() <<"\n"; 
+      TQs.removeAddressSpace();
+      TAS = Context.getQualifiedType(T.getUnqualifiedType(),TQs);
+      llvm::errs()<< "address space: " << TAS.getAddressSpace() << "\n";
+    }
+
   ParmVarDecl *New = ParmVarDecl::Create(Context, DC, StartLoc, NameLoc, Name,
-                                         Context.getAdjustedParameterType(T),
+                                         Context.getAdjustedParameterType(TAS),
                                          TSInfo, SC, nullptr);
 
   // Parameters can not be abstract class types.
   // For record types, this is done by the AbstractClassUsageDiagnoser once
   // the class has been completely parsed.
   if (!CurContext->isRecord() &&
-      RequireNonAbstractType(NameLoc, T, diag::err_abstract_type_in_decl,
+      RequireNonAbstractType(NameLoc, TAS, diag::err_abstract_type_in_decl,
                              AbstractParamType))
     New->setInvalidDecl();
 
   // Parameter declarators cannot be interface types. All ObjC objects are
   // passed by reference.
-  if (T->isObjCObjectType()) {
+  if (TAS->isObjCObjectType()) {
     SourceLocation TypeEndLoc =
         getLocForEndOfToken(TSInfo->getTypeLoc().getLocEnd());
     Diag(NameLoc,
-         diag::err_object_cannot_be_passed_returned_by_value) << 1 << T
+         diag::err_object_cannot_be_passed_returned_by_value) << 1 << TAS
       << FixItHint::CreateInsertion(TypeEndLoc, "*");
-    T = Context.getObjCObjectPointerType(T);
-    New->setType(T);
+    TAS = Context.getObjCObjectPointerType(TAS);
+    New->setType(TAS);
   }
 
   // ISO/IEC TR 18037 S6.7.3: "The type of an object with automatic storage
   // duration shall not be qualified by an address-space qualifier."
   // Since all parameters have automatic store duration, they can not have
   // an address space.
-  if (T.getAddressSpace() != 0) {
+  if (TAS.getAddressSpace() != 0) {
     // OpenCL and SYCL allows function arguments declared to be an array of a
     // type to be qualified with an address space.
     if (!((getLangOpts().OpenCL || getLangOpts().SYCLIsDevice) &&
