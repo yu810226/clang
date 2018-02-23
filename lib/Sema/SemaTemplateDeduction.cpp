@@ -956,11 +956,22 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
   QualType Param = S.Context.getCanonicalType(ParamIn);
   QualType Arg = S.Context.getCanonicalType(ArgIn);
 
+  Qualifiers ArgQs = Arg.getQualifiers();
+  QualType ArgAS = Arg;
+  if (S.getLangOpts().SYCLIsDevice)
+      if (ArgQs.hasAddressSpace()) {
+        if (Arg.getAddressSpace() != 0)
+          llvm::errs()<< "address space: " << Arg.getAddressSpace() << "\n";
+         ArgQs.removeAddressSpace();
+         ArgAS = S.Context.getQualifiedType(Arg.getUnqualifiedType(),ArgQs);
+         llvm::errs()<< "address space change to: " << ArgAS.getAddressSpace() << "\n";
+      }
+
   // If the argument type is a pack expansion, look at its pattern.
   // This isn't explicitly called out
   if (const PackExpansionType *ArgExpansion
-                                            = dyn_cast<PackExpansionType>(Arg))
-    Arg = ArgExpansion->getPattern();
+                                            = dyn_cast<PackExpansionType>(ArgAS))
+    ArgAS = ArgExpansion->getPattern();
 
   if (PartialOrdering) {
     // C++11 [temp.deduct.partial]p5:
@@ -972,11 +983,11 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
       Param = ParamRef->getPointeeType();
 
     //     - If A is a reference type, A is replaced by the type referred to.
-    const ReferenceType *ArgRef = Arg->getAs<ReferenceType>();
+    const ReferenceType *ArgRef = ArgAS->getAs<ReferenceType>();
     if (ArgRef)
-      Arg = ArgRef->getPointeeType();
+      ArgAS = ArgRef->getPointeeType();
 
-    if (ParamRef && ArgRef && S.Context.hasSameUnqualifiedType(Param, Arg)) {
+    if (ParamRef && ArgRef && S.Context.hasSameUnqualifiedType(Param, ArgAS)) {
       // C++11 [temp.deduct.partial]p9:
       //   If, for a given type, deduction succeeds in both directions (i.e.,
       //   the types are identical after the transformations above) and both
@@ -997,7 +1008,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
       // [the first type] is P and [the other type] is A here; the standard
       // gets this backwards.
       Qualifiers ParamQuals = Param.getQualifiers();
-      Qualifiers ArgQuals = Arg.getQualifiers();
+      Qualifiers ArgQuals = ArgAS.getQualifiers();
       if ((ParamRef->isLValueReferenceType() &&
            !ArgRef->isLValueReferenceType()) ||
           ParamQuals.isStrictSupersetOf(ArgQuals) ||
@@ -1018,7 +1029,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
     Param = Param.getUnqualifiedType();
     //     - If A is a cv-qualified type, A is replaced by the cv-unqualified
     //       version of A.
-    Arg = Arg.getUnqualifiedType();
+    ArgAS = ArgAS.getUnqualifiedType();
   } else {
     // C++0x [temp.deduct.call]p4 bullet 1:
     //   - If the original P is a reference type, the deduced A (i.e., the type
@@ -1028,7 +1039,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
       Qualifiers Quals;
       QualType UnqualParam = S.Context.getUnqualifiedArrayType(Param, Quals);
       Quals.setCVRQualifiers(Quals.getCVRQualifiers() &
-                             Arg.getCVRQualifiers());
+                             ArgAS.getCVRQualifiers());
       Param = S.Context.getQualifiedType(UnqualParam, Quals);
     }
 
@@ -1050,7 +1061,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
                                         = Param->getAs<RValueReferenceType>()) {
         if (isa<TemplateTypeParmType>(ParamRef->getPointeeType()) &&
             !ParamRef->getPointeeType().getQualifiers())
-          if (Arg->isLValueReferenceType())
+          if (ArgAS->isLValueReferenceType())
             Param = ParamRef->getPointeeType();
       }
     }
@@ -1066,7 +1077,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
   if (const TemplateTypeParmType *TemplateTypeParm
         = Param->getAs<TemplateTypeParmType>()) {
     // Just skip any attempts to deduce from a placeholder type.
-    if (Arg->isPlaceholderType())
+    if (ArgAS->isPlaceholderType())
       return Sema::TDK_Success;
     
     unsigned Index = TemplateTypeParm->getIndex();
@@ -1074,11 +1085,11 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
 
     // If the argument type is an array type, move the qualifiers up to the
     // top level, so they can be matched with the qualifiers on the parameter.
-    if (isa<ArrayType>(Arg)) {
+    if (isa<ArrayType>(ArgAS)) {
       Qualifiers Quals;
-      Arg = S.Context.getUnqualifiedArrayType(Arg, Quals);
+      ArgAS = S.Context.getUnqualifiedArrayType(ArgAS, Quals);
       if (Quals) {
-        Arg = S.Context.getQualifiedType(Arg, Quals);
+        ArgAS = S.Context.getQualifiedType(ArgAS, Quals);
         RecanonicalizeArg = true;
       }
     }
@@ -1086,16 +1097,16 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
     // The argument type can not be less qualified than the parameter
     // type.
     if (!(TDF & TDF_IgnoreQualifiers) &&
-        hasInconsistentOrSupersetQualifiersOf(Param, Arg, S)) {
+        hasInconsistentOrSupersetQualifiersOf(Param, ArgAS, S)) {
       Info.Param = cast<TemplateTypeParmDecl>(TemplateParams->getParam(Index));
       Info.FirstArg = TemplateArgument(Param);
-      Info.SecondArg = TemplateArgument(Arg);
+      Info.SecondArg = TemplateArgument(ArgAS);
       return Sema::TDK_Underqualified;
     }
 
     assert(TemplateTypeParm->getDepth() == 0 && "Can't deduce with depth > 0");
-    assert(Arg != S.Context.OverloadTy && "Unresolved overloaded function");
-    QualType DeducedType = Arg;
+    assert(ArgAS != S.Context.OverloadTy && "Unresolved overloaded function");
+    QualType DeducedType = ArgAS;
 
     // Remove any qualifiers on the parameter from the deduced type.
     // We checked the qualifiers for consistency above.
@@ -1116,7 +1127,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
         !DeducedType->isDependentType()) {
       Info.Param = cast<TemplateTypeParmDecl>(TemplateParams->getParam(Index));
       Info.FirstArg = TemplateArgument(Param);
-      Info.SecondArg = TemplateArgument(Arg);
+      Info.SecondArg = TemplateArgument(ArgAS);
       return Sema::TDK_Underqualified;      
     }
     
@@ -1162,13 +1173,13 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
 
   // Check the cv-qualifiers on the parameter and argument types.
   CanQualType CanParam = S.Context.getCanonicalType(Param);
-  CanQualType CanArg = S.Context.getCanonicalType(Arg);
+  CanQualType CanArg = S.Context.getCanonicalType(ArgAS);
   if (!(TDF & TDF_IgnoreQualifiers)) {
     if (TDF & TDF_ParamWithReferenceType) {
-      if (hasInconsistentOrSupersetQualifiersOf(Param, Arg, S))
+      if (hasInconsistentOrSupersetQualifiersOf(Param, ArgAS, S))
         return Sema::TDK_NonDeducedMismatch;
     } else if (!IsPossiblyOpaquelyQualifiedType(Param)) {
-      if (Param.getCVRQualifiers() != Arg.getCVRQualifiers())
+      if (Param.getCVRQualifiers() != ArgAS.getCVRQualifiers())
         return Sema::TDK_NonDeducedMismatch;
     }
     
@@ -1177,7 +1188,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
       if (!(TDF & TDF_SkipNonDependent)) {
         bool NonDeduced = (TDF & TDF_InOverloadResolution)?
                           !S.isSameOrCompatibleFunctionType(CanParam, CanArg) :
-                          Param != Arg;
+                          Param != ArgAS;
         if (NonDeduced) {
           return Sema::TDK_NonDeducedMismatch;
         }
@@ -1222,15 +1233,15 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
       
       if (TDF & TDF_IgnoreQualifiers) {
         Param = Param.getUnqualifiedType();
-        Arg = Arg.getUnqualifiedType();
+        ArgAS = ArgAS.getUnqualifiedType();
       }
             
-      return Param == Arg? Sema::TDK_Success : Sema::TDK_NonDeducedMismatch;
+      return Param == ArgAS? Sema::TDK_Success : Sema::TDK_NonDeducedMismatch;
     }
       
     //     _Complex T   [placeholder extension]  
     case Type::Complex:
-      if (const ComplexType *ComplexArg = Arg->getAs<ComplexType>())
+      if (const ComplexType *ComplexArg = ArgAS->getAs<ComplexType>())
         return DeduceTemplateArgumentsByTypeMatch(S, TemplateParams, 
                                     cast<ComplexType>(Param)->getElementType(), 
                                     ComplexArg->getElementType(),
@@ -1240,7 +1251,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
 
     //     _Atomic T   [extension]
     case Type::Atomic:
-      if (const AtomicType *AtomicArg = Arg->getAs<AtomicType>())
+      if (const AtomicType *AtomicArg = ArgAS->getAs<AtomicType>())
         return DeduceTemplateArgumentsByTypeMatch(S, TemplateParams,
                                        cast<AtomicType>(Param)->getValueType(),
                                        AtomicArg->getValueType(),
@@ -1254,7 +1265,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
       if (const PointerType *PointerArg = Arg->getAs<PointerType>()) {
         PointeeType = PointerArg->getPointeeType();
       } else if (const ObjCObjectPointerType *PointerArg
-                   = Arg->getAs<ObjCObjectPointerType>()) {
+                   = ArgAS->getAs<ObjCObjectPointerType>()) {
         PointeeType = PointerArg->getPointeeType();
       } else {
         return Sema::TDK_NonDeducedMismatch;
@@ -1270,7 +1281,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
     //     T &
     case Type::LValueReference: {
       const LValueReferenceType *ReferenceArg =
-          Arg->getAs<LValueReferenceType>();
+          ArgAS->getAs<LValueReferenceType>();
       if (!ReferenceArg)
         return Sema::TDK_NonDeducedMismatch;
 
@@ -1282,7 +1293,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
     //     T && [C++0x]
     case Type::RValueReference: {
       const RValueReferenceType *ReferenceArg =
-          Arg->getAs<RValueReferenceType>();
+          ArgAS->getAs<RValueReferenceType>();
       if (!ReferenceArg)
         return Sema::TDK_NonDeducedMismatch;
 
@@ -1295,7 +1306,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
     //     T [] (implied, but not stated explicitly)
     case Type::IncompleteArray: {
       const IncompleteArrayType *IncompleteArrayArg =
-        S.Context.getAsIncompleteArrayType(Arg);
+        S.Context.getAsIncompleteArrayType(ArgAS);
       if (!IncompleteArrayArg)
         return Sema::TDK_NonDeducedMismatch;
 
@@ -1309,7 +1320,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
     //     T [integer-constant]
     case Type::ConstantArray: {
       const ConstantArrayType *ConstantArrayArg =
-        S.Context.getAsConstantArrayType(Arg);
+        S.Context.getAsConstantArrayType(ArgAS);
       if (!ConstantArrayArg)
         return Sema::TDK_NonDeducedMismatch;
 
@@ -1333,13 +1344,13 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
       if (S.Context.getLangOpts().SYCLIsDevice &&
           (TDF & TDF_ParamWithReferenceType) &&
           !Param.hasAddressSpace() &&
-          Arg.hasAddressSpace()) {
+          ArgAS.hasAddressSpace()) {
         Qualifiers quals = Param.getQualifiers();
-        quals.setAddressSpace(Arg.getAddressSpace());
+        quals.setAddressSpace(ArgAS.getAddressSpace());
         Param = S.Context.getQualifiedType(Param.getUnqualifiedType(), quals);
       }
 
-      const ArrayType *ArrayArg = S.Context.getAsArrayType(Arg);
+      const ArrayType *ArrayArg = S.Context.getAsArrayType(ArgAS);
       if (!ArrayArg)
         return Sema::TDK_NonDeducedMismatch;
 
@@ -1390,7 +1401,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
     case Type::FunctionProto: {
       unsigned SubTDF = TDF & TDF_TopLevelParameterTypeList;
       const FunctionProtoType *FunctionProtoArg =
-        dyn_cast<FunctionProtoType>(Arg);
+        dyn_cast<FunctionProtoType>(ArgAS);
       if (!FunctionProtoArg)
         return Sema::TDK_NonDeducedMismatch;
 
@@ -1439,16 +1450,16 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
 
       // When Arg cannot be a derived class, we can just try to deduce template
       // arguments from the template-id.
-      const RecordType *RecordT = Arg->getAs<RecordType>();
+      const RecordType *RecordT = ArgAS->getAs<RecordType>();
       if (!(TDF & TDF_DerivedClass) || !RecordT)
-        return DeduceTemplateArguments(S, TemplateParams, SpecParam, Arg, Info,
+        return DeduceTemplateArguments(S, TemplateParams, SpecParam, ArgAS, Info,
                                        Deduced);
 
       SmallVector<DeducedTemplateArgument, 8> DeducedOrig(Deduced.begin(),
                                                           Deduced.end());
 
       Sema::TemplateDeductionResult Result = DeduceTemplateArguments(
-          S, TemplateParams, SpecParam, Arg, Info, Deduced);
+          S, TemplateParams, SpecParam, ArgAS, Info, Deduced);
 
       if (Result == Sema::TDK_Success)
         return Result;
@@ -1456,7 +1467,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
       // We cannot inspect base classes as part of deduction when the type
       // is incomplete, so either instantiate any templates necessary to
       // complete the type, or skip over it if it cannot be completed.
-      if (!S.isCompleteType(Info.getLocation(), Arg))
+      if (!S.isCompleteType(Info.getLocation(), ArgAS))
         return Result;
 
       // C++14 [temp.deduct.call] p4b3:
@@ -1545,7 +1556,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
     //     T (T::*)(T)
     case Type::MemberPointer: {
       const MemberPointerType *MemPtrParam = cast<MemberPointerType>(Param);
-      const MemberPointerType *MemPtrArg = dyn_cast<MemberPointerType>(Arg);
+      const MemberPointerType *MemPtrArg = dyn_cast<MemberPointerType>(ArgAS);
       if (!MemPtrArg)
         return Sema::TDK_NonDeducedMismatch;
 
@@ -1580,7 +1591,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
     //     T(^)(T)
     case Type::BlockPointer: {
       const BlockPointerType *BlockPtrParam = cast<BlockPointerType>(Param);
-      const BlockPointerType *BlockPtrArg = dyn_cast<BlockPointerType>(Arg);
+      const BlockPointerType *BlockPtrArg = dyn_cast<BlockPointerType>(ArgAS);
 
       if (!BlockPtrArg)
         return Sema::TDK_NonDeducedMismatch;
@@ -1596,7 +1607,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
     //     T __attribute__(((ext_vector_type(<integral constant>))))
     case Type::ExtVector: {
       const ExtVectorType *VectorParam = cast<ExtVectorType>(Param);
-      if (const ExtVectorType *VectorArg = dyn_cast<ExtVectorType>(Arg)) {
+      if (const ExtVectorType *VectorArg = dyn_cast<ExtVectorType>(ArgAS)) {
         // Make sure that the vectors have the same number of elements.
         if (VectorParam->getNumElements() != VectorArg->getNumElements())
           return Sema::TDK_NonDeducedMismatch;
@@ -1609,7 +1620,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
       }
       
       if (const DependentSizedExtVectorType *VectorArg 
-                                = dyn_cast<DependentSizedExtVectorType>(Arg)) {
+                                = dyn_cast<DependentSizedExtVectorType>(ArgAS)) {
         // We can't check the number of elements, since the argument has a
         // dependent number of elements. This can only occur during partial
         // ordering.
@@ -1631,7 +1642,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
       const DependentSizedExtVectorType *VectorParam
         = cast<DependentSizedExtVectorType>(Param);
 
-      if (const ExtVectorType *VectorArg = dyn_cast<ExtVectorType>(Arg)) {
+      if (const ExtVectorType *VectorArg = dyn_cast<ExtVectorType>(ArgAS)) {
         // Perform deduction on the element types.
         if (Sema::TemplateDeductionResult Result
               = DeduceTemplateArgumentsByTypeMatch(S, TemplateParams,
@@ -1653,7 +1664,7 @@ DeduceTemplateArgumentsByTypeMatch(Sema &S,
       }
       
       if (const DependentSizedExtVectorType *VectorArg 
-                                = dyn_cast<DependentSizedExtVectorType>(Arg)) {
+                                = dyn_cast<DependentSizedExtVectorType>(ArgAS)) {
         // Perform deduction on the element types.
         if (Sema::TemplateDeductionResult Result
             = DeduceTemplateArgumentsByTypeMatch(S, TemplateParams,
