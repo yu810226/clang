@@ -491,12 +491,13 @@ public:
          other.getAddressSpace() != LangAS::opencl_constant) ||
         // Otherwise in SYCL, every address except for __constant can be
         // used as __generic or 0
-        ((getAddressSpace() == 4 || getAddressSpace() == 0) &&
-        (other.getAddressSpace() == 0 ||
-         other.getAddressSpace() == 1 ||
-         other.getAddressSpace() == 2 ||
-         other.getAddressSpace() == 3 ||
-         other.getAddressSpace() == 4));
+        ((toTargetAddressSpace(getAddressSpace()) == 4 ||
+         toTargetAddressSpace(getAddressSpace()) == 0) &&
+        (toTargetAddressSpace(other.getAddressSpace()) == 0 ||
+         toTargetAddressSpace(other.getAddressSpace()) == 1 ||
+         toTargetAddressSpace(other.getAddressSpace()) == 2 ||
+         toTargetAddressSpace(other.getAddressSpace()) == 3 ||
+         toTargetAddressSpace(other.getAddressSpace()) == 4));
   }
 
   /// Determines if these qualifiers compatibly include another set.

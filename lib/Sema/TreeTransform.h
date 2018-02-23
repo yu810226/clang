@@ -692,7 +692,7 @@ public:
   /// permitted. Subclasses may override this routine to provide different
   /// behavior.
   QualType RebuildQualifiedType(QualType T, SourceLocation Loc,
-                                Qualifiers Quals);
+                                Qualifiers Quals, TypeLocBuilder &TLB);
 
   /// \brief Build a new pointer type given its pointee type.
   ///
@@ -4200,7 +4200,7 @@ TreeTransform<Derived>::TransformTypeWithDeducedTST(TypeSourceInfo *DI) {
 
   if (QTL) {
     Result = getDerived().RebuildQualifiedType(
-        Result, QTL.getBeginLoc(), QTL.getType().getLocalQualifiers());
+        Result, QTL.getBeginLoc(), QTL.getType().getLocalQualifiers(), TLB);
     TLB.TypeWasModifiedSafely(Result);
   }
 
@@ -4217,7 +4217,8 @@ TreeTransform<Derived>::TransformQualifiedType(TypeLocBuilder &TLB,
   if (Result.isNull())
     return QualType();
 
-  Result = getDerived().RebuildQualifiedType(Result, T.getBeginLoc(), Quals);
+  Result = getDerived().RebuildQualifiedType(Result, T.getBeginLoc(), Quals,
+                                             TLB);
 
   // RebuildQualifiedType might have updated the type, but not in a way
   // that invalidates the TypeLoc. (There's no location information for
@@ -4230,34 +4231,33 @@ TreeTransform<Derived>::TransformQualifiedType(TypeLocBuilder &TLB,
 template<typename Derived>
 QualType TreeTransform<Derived>::RebuildQualifiedType(QualType T,
                                                       SourceLocation Loc,
-                                                      Qualifiers Quals) {
+                                                      Qualifiers Quals,
+                                                      TypeLocBuilder &TLB) {
   // SYCL
   if(SemaRef.Context.getLangOpts().SYCLIsDevice) {
     // Member functions can be qualified with the address space
-    if(Result->isFunctionType() &&
-      Quals.hasAddressSpace() && !Result.hasAddressSpace()) {
-      Qualifiers ResultQuals = Result.getQualifiers();
+    if(T->isFunctionType() &&
+      Quals.hasAddressSpace() && !T.hasAddressSpace()) {
+      Qualifiers ResultQuals = T.getQualifiers();
       ResultQuals.setAddressSpace(Quals.getAddressSpace());
-      Result = SemaRef.BuildQualifiedType(Result,
-                                          T.getBeginLoc(),
-                                          ResultQuals);
-      TLB.push<QualifiedTypeLoc>(Result);
+      T = SemaRef.BuildQualifiedType(T, Loc, ResultQuals);
+      TLB.push<QualifiedTypeLoc>(T);
     } else if(Quals.hasAddressSpace()) {
       const AutoType *AutoTy;
-      if (Result.hasAddressSpace()) {
+      if (T.hasAddressSpace()) {
         if (const SubstTemplateTypeParmType *SubstTypeParam =
-                                 dyn_cast<SubstTemplateTypeParmType>(Result)) {
+                                 dyn_cast<SubstTemplateTypeParmType>(T)) {
           QualType Replacement = SubstTypeParam->getReplacementType();
           Qualifiers Qs = Replacement.getQualifiers();
           Qs.removeAddressSpace();
           Replacement = SemaRef.Context.getQualifiedType(
                                               Replacement.getUnqualifiedType(),
                                               Qs);
-          Result = SemaRef.Context.getSubstTemplateTypeParmType(
+          T = SemaRef.Context.getSubstTemplateTypeParmType(
                                         SubstTypeParam->getReplacedParameter(),
                                         Replacement);
-          TLB.TypeWasModifiedSafely(Result);
-        } else if ((AutoTy = dyn_cast<AutoType>(Result)) &&
+          TLB.TypeWasModifiedSafely(T);
+        } else if ((AutoTy = dyn_cast<AutoType>(T)) &&
                    AutoTy->isDeduced()) {
           // 'auto' types behave the same way as template parameters.
           QualType Deduced = AutoTy->getDeducedType();
@@ -4266,10 +4266,10 @@ QualType TreeTransform<Derived>::RebuildQualifiedType(QualType T,
           Deduced = SemaRef.Context.getQualifiedType(
                                                   Deduced.getUnqualifiedType(),
                                                   Qs);
-          Result = SemaRef.Context.getAutoType(Deduced,
+          T = SemaRef.Context.getAutoType(Deduced,
                                                AutoTypeKeyword::DecltypeAuto,
                                                AutoTy->isDependentType());
-          TLB.TypeWasModifiedSafely(Result);
+          TLB.TypeWasModifiedSafely(T);
         }
       }
     }

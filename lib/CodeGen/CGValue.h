@@ -506,8 +506,8 @@ public:
       AV.Addr = nullptr;
       AV.Alignment = 0;
     }
+    
     AV.Quals = quals;
-    AV.DestructedFlag = isDestructed;
     AV.ObjCGCFlag = needsGC;
     AV.ZeroedFlag = isZeroed;
     AV.AliasedFlag = isAliased;

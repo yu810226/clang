@@ -3076,9 +3076,9 @@ CheckOriginalCallArgDeduction(Sema &S, TemplateDeductionInfo &Info,
     //   The generic address space can be implicitly added to type
     //   during deduction, this address space can be ignored
     if (S.getLangOpts().SYCLIsDevice &&
-        (DeducedAQuals.getAddressSpace() == 4 ||
-         DeducedAQuals.getAddressSpace() == 0) &&
-        AQuals.getAddressSpace() != 4)
+        (toTargetAddressSpace(DeducedAQuals.getAddressSpace()) == 4 ||
+         toTargetAddressSpace(DeducedAQuals.getAddressSpace()) == 0) &&
+         toTargetAddressSpace(AQuals.getAddressSpace()) != 4)
       DeducedAQuals.setAddressSpace(AQuals.getAddressSpace());
 
     if (AQuals == DeducedAQuals) {
@@ -3479,8 +3479,8 @@ static bool AdjustFunctionParmAndArgTypesForDeduction(
     QualType ParamTypeQAS = ParamType;
     if (S.Context.getLangOpts().SYCLIsDevice) {
       Qualifiers PointeeQs = ParamType.getQualifiers();
-      if (PointeeQs.getAddressSpace() == 4 ||
-          PointeeQs.getAddressSpace() == 0 ||
+      if (toTargetAddressSpace(PointeeQs.getAddressSpace()) == 4 ||
+          toTargetAddressSpace(PointeeQs.getAddressSpace()) == 0 ||
           PointeeQs.getAddressSpace() == ArgType.getAddressSpace()) {
         PointeeQs.removeAddressSpace();
         ParamTypeQAS = S.Context.getQualifiedType(

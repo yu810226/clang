@@ -11917,8 +11917,8 @@ void Sema::DefineImplicitMoveAssignment(SourceLocation CurrentLocation,
       getAs<RValueReferenceType>()->getPointeeType();
   Qualifiers OtherQuals = OtherRefType.getQualifiers();
   if (Context.getLangOpts().SYCLIsDevice &&
-      MoveAssignOperator->getType().getAddressSpace()
-       == OtherRefType.getAddressSpace()) {
+      (MoveAssignOperator->getType().getAddressSpace()
+       == OtherRefType.getAddressSpace())) {
     OtherQuals.removeAddressSpace();
   }
   assert(!OtherQuals &&

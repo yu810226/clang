@@ -693,6 +693,11 @@ void CodeGenFunction::EmitInitializerForField(FieldDecl *Field, LValue LHS,
     EmitComplexExprIntoLValue(Init, LHS, /*isInit*/ true);
     break;
   case TEK_Aggregate: {
+    // The LHS is a pointer to the first object we'll be constructing, as
+    // a flat array.
+    QualType BaseElementTy = getContext().getBaseElementType(FieldType);
+    llvm::Type *BasePtr = ConvertType(BaseElementTy);
+
     AggValueSlot Slot =
       AggValueSlot::forLValue(LHS,
                               AggValueSlot::IsDestructed,

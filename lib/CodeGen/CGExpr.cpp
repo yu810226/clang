@@ -380,7 +380,7 @@ static Address createReferenceTemporary(CodeGenFunction &CGF,
     // global, local and constant address spaces always refer to program scope
     // objects; private to function/kernel scope; generic (and no address space
     // information usually is deduced by checking classical C++ storage duration.
-    switch (CGF.getContext().getBaseElementType(M->getType()).getAddressSpace()) {
+    switch (toTargetAddressSpace(CGF.getContext().getBaseElementType(M->getType()).getAddressSpace())) {
     case 1:
     case 3:
     case 2:

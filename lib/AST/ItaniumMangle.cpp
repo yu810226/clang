@@ -1518,10 +1518,10 @@ void CXXNameMangler::mangleNestedName(const NamedDecl *ND,
     // SYCL
     //   The method can be overloaded based on the address space in SYCL
     if (getASTContext().getLangOpts().SYCLIsDevice) {
-      unsigned int AS = Method->getType().getAddressSpace();
+      //unsigned int AS = Method->getType().getAddressSpace();
 
       // Mangle method address space. It is needed to deduce a 'this' type
-      MethodQuals.setAddressSpace(AS);
+      MethodQuals.setAddressSpace(Method->getType().getAddressSpace());
     }
 
     mangleQualifiers(MethodQuals);
@@ -2246,15 +2246,12 @@ void CXXNameMangler::mangleQualifiers(Qualifiers Quals, const DependentAddressSp
       switch (AS) {
       default: llvm_unreachable("Not a language specific address space");
       //  <OpenCL-addrspace> ::= "CL" [ "global" | "local" | "constant" ]
-      case LangAS::opencl_global:
-      //ASString = "CLglobal";   break;
-      case 1:   ASString = "CLglobal";   break;
-      case LangAS::opencl_local:
-      //ASString = "CLlocal";    break;
-      case 3:    ASString = "CLlocal";    break;
-      case LangAS::opencl_constant:
-      //ASString = "CLconstant"; break;
-      case 2:    ASString = "CLconstant"; break;
+      case LangAS::opencl_global:   ASString = "CLglobal";   break;
+      //case 1:   ASString = "CLglobal";   break;
+      case LangAS::opencl_local:    ASString = "CLlocal";    break;
+      //case 3:    ASString = "CLlocal";    break;
+      case LangAS::opencl_constant: ASString = "CLconstant"; break;
+      //case 2:    ASString = "CLconstant"; break;
       case LangAS::opencl_private:  ASString = "CLprivate";  break;
       case LangAS::opencl_generic:  ASString = "CLgeneric";  break;
       //  <CUDA-addrspace> ::= "CU" [ "device" | "constant" | "shared" ]

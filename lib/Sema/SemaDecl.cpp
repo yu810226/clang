@@ -11476,14 +11476,14 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   bool IsGlobal = GlobalStorage && !var->isStaticLocal();
   bool IsNonProgramScopeGlobalMem =
       getLangOpts().SYCLIsDevice &&
-      type.getAddressSpace() == 1 &&
+      toTargetAddressSpace(type.getAddressSpace()) == 1 &&
       (!var->isFileVarDecl() || var->isStaticDataMember());
   QualType baseType = Context.getBaseElementType(type);
 
   if (Init && !Init->isValueDependent()) {
     if (var->isConstexpr() ||
           (getLangOpts().SYCLIsDevice &&
-          (type.getAddressSpace() == 2 ||
+          (toTargetAddressSpace(type.getAddressSpace()) == 2 ||
            IsNonProgramScopeGlobalMem))) {
       SmallVector<PartialDiagnosticAt, 8> Notes;
       if (!var->evaluateValue(Notes) || !var->isInitICE()) {
@@ -11494,39 +11494,11 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
               diag::note_invalid_subexpr_in_const_expr) {
             DiagLoc = Notes[0].first;
             Notes.clear();
-          }
-
+        }
+        Diag(DiagLoc, diag::err_constexpr_var_requires_const_init)
+          << var << Init->getSourceRange();
           for (unsigned I = 0, N = Notes.size(); I != N; ++I)
             Diag(Notes[I].first, Notes[I].second);
-        }
-      } else if (var->isUsableInConstantExpressions(Context)) {
-        // Check whether the initializer of a const variable of integral or
-        // enumeration type is an ICE now, since we can't tell whether it was
-        // initialized by a constant expression if we check later.
-        var->checkInitIsICE();
-      }
-    } else {
-      if (var->isConstexpr()) {
-        SmallVector<PartialDiagnosticAt, 8> Notes;
-        if (!var->evaluateValue(Notes) || !var->isInitICE()) {
-          SourceLocation DiagLoc = var->getLocation();
-          // If the note doesn't add any useful information other than a source
-          // location, fold it into the primary diagnostic.
-          if (Notes.size() == 1 && Notes[0].second.getDiagID() ==
-                diag::note_invalid_subexpr_in_const_expr) {
-            DiagLoc = Notes[0].first;
-            Notes.clear();
-          }
-          Diag(DiagLoc, diag::err_constexpr_var_requires_const_init)
-            << var << Init->getSourceRange();
-          for (unsigned I = 0, N = Notes.size(); I != N; ++I)
-            Diag(Notes[I].first, Notes[I].second);
-        }
-      } else if (var->isUsableInConstantExpressions(Context)) {
-        // Check whether the initializer of a const variable of integral or
-        // enumeration type is an ICE now, since we can't tell whether it was
-        // initialized by a constant expression if we check later.
-        var->checkInitIsICE();
       }
     } else if (var->isUsableInConstantExpressions(Context)) {
       // Check whether the initializer of a const variable of integral or
@@ -12191,11 +12163,11 @@ ParmVarDecl *Sema::CheckParameter(DeclContext *DC, SourceLocation StartLoc,
   QualType TAS = T;
 
   if (getLangOpts().SYCLIsDevice && !T->isArrayType())
-    if (T.getAddressSpace() != 0) {
+    if (toTargetAddressSpace(T.getAddressSpace()) != 0) {
       llvm::errs()<< "name: " << Name->getName().str() <<"\n";
       TQs.removeAddressSpace();
       TAS = Context.getQualifiedType(T.getUnqualifiedType(),TQs);
-      llvm::errs()<< "address space: " << TAS.getAddressSpace() << "\n";
+      llvm::errs()<< "address space: " << toTargetAddressSpace(TAS.getAddressSpace()) << "\n";
     }
 
   ParmVarDecl *New = ParmVarDecl::Create(Context, DC, StartLoc, NameLoc, Name,
@@ -12230,8 +12202,7 @@ ParmVarDecl *Sema::CheckParameter(DeclContext *DC, SourceLocation StartLoc,
       // OpenCL and SYCL allows function arguments declared to be an array of
       // a type to be qualified with an address space.
       !((getLangOpts().OpenCL || getLangOpts().SYCLIsDevice) &&
-        (T->isArrayType() || T.getAddressSpace() ==
-         (LangAS::opencl_private || 0 )))) {
+        (T->isArrayType() || T.getAddressSpace() == LangAS::opencl_private ))) {
     Diag(NameLoc, diag::err_arg_with_address_space);
     New->setInvalidDecl();
   }

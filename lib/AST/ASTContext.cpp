@@ -2602,11 +2602,11 @@ QualType ASTContext::getFunctionTypeWithExceptionSpec(
   // Anything else must be a function type. Rebuild it with the new exception
   // specification.
   const FunctionProtoType *Proto = cast<FunctionProtoType>(Orig);
-  QualType FnTy = Context.getFunctionType(
+  QualType FnTy = getFunctionType(
       Proto->getReturnType(), Proto->getParamTypes(),
       Proto->getExtProtoInfo().withExceptionSpec(ESI));
-  if (Context.getLangOpts().SYCLIsDevice)
-    FnTy = Context.getAddrSpaceQualType(FnTy, Orig.getAddressSpace());
+  if (getLangOpts().SYCLIsDevice)
+    FnTy = getAddrSpaceQualType(FnTy, Orig.getAddressSpace());
   return FnTy;
 }
 

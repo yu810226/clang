@@ -232,7 +232,7 @@ llvm::Constant *CodeGenModule::getOrCreateStaticVarDecl(
   // Local address space cannot have an initializer.
   llvm::Constant *Init = nullptr;
   if (Ty.getAddressSpace() != LangAS::opencl_local ||
-      Ty.getAddressSpace() != 3) // For SYCL local address space
+      toTargetAddressSpace(Ty.getAddressSpace()) != 3) // For SYCL local address space
     Init = EmitNullConstant(Ty);
   else
     Init = llvm::UndefValue::get(LTy);

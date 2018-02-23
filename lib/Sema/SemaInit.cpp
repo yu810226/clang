@@ -3777,7 +3777,7 @@ static void TryConstructorInitialization(Sema &S,
                                           CandidateSet, DestType, Ctors, Best,
                                           CopyInitialization, AllowExplicit,
                                           /*OnlyListConstructor=*/true,
-                                          IsListInit, DestType);
+                                          IsListInit);
   }
 
   // C++11 [over.match.list]p1:
@@ -3791,7 +3791,7 @@ static void TryConstructorInitialization(Sema &S,
                                         CandidateSet, DestType, Ctors, Best,
                                         CopyInitialization, AllowExplicit,
                                         /*OnlyListConstructors=*/false,
-                                        IsListInit, DestType);
+                                        IsListInit);
   }
   if (Result) {
     Sequence.SetOverloadFailure(IsListInit ?
@@ -8623,13 +8623,23 @@ QualType Sema::DeduceTemplateSpecializationFromInitializer(
       // ever have a parameter of the right type.
       bool SuppressUserConversions = Kind.isCopyInit();
 
-      if (TD)
-        AddTemplateOverloadCandidate(TD, I.getPair(), /*ExplicitArgs*/ nullptr,
-                                     Inits, Candidates,
-                                     SuppressUserConversions);
-      else
-        AddOverloadCandidate(GD, I.getPair(), Inits, Candidates,
-                             SuppressUserConversions);
+      if (TD) {
+        if (Context.getLangOpts().SYCLIsDevice)
+          AddTemplateOverloadCandidate(TD, I.getPair(), /*ExplicitArgs*/ nullptr,
+                                       QualType(), Inits, Candidates,
+                                       SuppressUserConversions);
+        else
+          AddTemplateOverloadCandidate(TD, I.getPair(), /*ExplicitArgs*/ nullptr,
+                                       Inits, Candidates,
+                                       SuppressUserConversions);
+      } else {
+        if (Context.getLangOpts().SYCLIsDevice)
+          AddOverloadCandidate(GD, I.getPair(), Inits, Candidates, QualType(),
+                               SuppressUserConversions);
+        else
+          AddOverloadCandidate(GD, I.getPair(), Inits, Candidates,
+                               SuppressUserConversions);
+      }
     }
     return Candidates.BestViableFunction(*this, Kind.getLocation(), Best);
   };

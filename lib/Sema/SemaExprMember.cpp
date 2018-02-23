@@ -1785,7 +1785,7 @@ Sema::BuildFieldReferenceExpr(Expr *BaseExpr, bool IsArrow,
         Context.getCanonicalType(MemberType).getQualifiers();
 
     assert(!MemberQuals.hasAddressSpace() ||
-           S.Context.getLangOpts().SYCLIsDevice);
+           Context.getLangOpts().SYCLIsDevice);
 
     Qualifiers Combined = BaseQuals + MemberQuals;
     if (Combined != MemberQuals)

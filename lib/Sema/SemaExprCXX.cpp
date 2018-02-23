@@ -2166,16 +2166,27 @@ resolveAllocationOverload(Sema &S, LookupResult &R, SourceRange Range,
     NamedDecl *D = (*Alloc)->getUnderlyingDecl();
 
     if (FunctionTemplateDecl *FnTemplate = dyn_cast<FunctionTemplateDecl>(D)) {
-      S.AddTemplateOverloadCandidate(FnTemplate, Alloc.getPair(),
-                                     /*ExplicitTemplateArgs=*/nullptr, Args,
-                                     Candidates,
-                                     /*SuppressUserConversions=*/false);
+      if (S.getLangOpts().SYCLIsDevice)
+        S.AddTemplateOverloadCandidate(FnTemplate, Alloc.getPair(),
+                                       /*ExplicitTemplateArgs=*/nullptr,
+                                       QualType(), Args, Candidates,
+                                       /*SuppressUserConversions=*/false);
+      else
+        S.AddTemplateOverloadCandidate(FnTemplate, Alloc.getPair(),
+                                       /*ExplicitTemplateArgs=*/nullptr, Args,
+                                       Candidates,
+                                       /*SuppressUserConversions=*/false);
       continue;
     }
 
     FunctionDecl *Fn = cast<FunctionDecl>(D);
-    S.AddOverloadCandidate(Fn, Alloc.getPair(), Args, Candidates,
-                           /*SuppressUserConversions=*/false);
+    if (S.getLangOpts().SYCLIsDevice)
+      S.AddOverloadCandidate(Fn, Alloc.getPair(), Args, Candidates,
+                             QualType(),
+                             /*SuppressUserConversions=*/false);
+    else
+      S.AddOverloadCandidate(Fn, Alloc.getPair(), Args, Candidates,
+                             /*SuppressUserConversions=*/false);
   }
 
   // Do the resolution.
@@ -3207,8 +3218,8 @@ Sema::ActOnCXXDelete(SourceLocation StartLoc, bool UseGlobal,
     QualType PointeeElem = Context.getBaseElementType(Pointee);
 
     // llvm version 7.0
-    //if (Pointee.getAddressSpace() != LangAS::Default)
-    if (unsigned AddressSpace = Pointee.getAddressSpace()
+    if ((Pointee.getAddressSpace() != LangAS::Default)
+    //if (unsigned AddressSpace = (unsigned)Pointee.getAddressSpace()
          && !getLangOpts().SYCLIsDevice)
       return Diag(Ex.get()->getLocStart(),
                   diag::err_address_space_qualified_delete)
@@ -3722,8 +3733,8 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
   bool addressSpaceConversion = false;
   if (Context.getLangOpts().SYCLIsDevice &&
       isa<PointerType>(LHSType) && isa<PointerType>(RHSType)) {
-    unsigned AddrSpaceL = LHSType->getPointeeType().getAddressSpace();
-    unsigned AddrSpaceR = RHSType->getPointeeType().getAddressSpace();
+    unsigned AddrSpaceL = toTargetAddressSpace(LHSType->getPointeeType().getAddressSpace());
+    unsigned AddrSpaceR = toTargetAddressSpace(RHSType->getPointeeType().getAddressSpace());
     addressSpaceConversion = AddrSpaceL != AddrSpaceR;
     if ((AddrSpaceL == 0 && AddrSpaceR == 4) ||
         (AddrSpaceL == 4 && AddrSpaceR == 0)) {
@@ -3732,10 +3743,10 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
   }
 
   if (addressSpaceConversion) {
-    assert((LHSType->getPointeeType().getAddressSpace() == 4 ||
-           LHSType->getPointeeType().getAddressSpace() == 0)
+    assert((toTargetAddressSpace(LHSType->getPointeeType().getAddressSpace()) == 4 ||
+            toTargetAddressSpace(LHSType->getPointeeType().getAddressSpace()) == 0)
            && "LHS pointer is not in the generic address space");
-    assert(RHSType->getPointeeType().getAddressSpace() != 2 &&
+    assert(toTargetAddressSpace(RHSType->getPointeeType().getAddressSpace()) != 2 &&
            "Constant to generic address space conversion is not allowed");
 
     From = ImpCastExprToType(From, ToType, CK_AddressSpaceConversion,

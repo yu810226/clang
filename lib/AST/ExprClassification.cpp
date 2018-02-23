@@ -627,10 +627,11 @@ static Cl::ModifiableType IsModifiable(ASTContext &Ctx, const Expr *E,
   // Const stuff is obviously not modifiable.
   if (CT.isConstQualified())
     return Cl::CM_ConstQualified;
+  // Add SYCL constant address space support
   if ((Ctx.getLangOpts().OpenCL &&
       CT.getQualifiers().getAddressSpace() == LangAS::opencl_constant) ||
       (Ctx.getLangOpts().SYCLIsDevice &&
-       CT.getQualifiers().getAddressSpace() == 2)) // SYCL constant address space
+      toTargetAddressSpace(CT.getQualifiers().getAddressSpace()) == 2))
     return Cl::CM_ConstAddrSpace;
 
   // Arrays are not modifiable, only their elements are.

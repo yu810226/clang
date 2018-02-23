@@ -1062,7 +1062,7 @@ bool Sema::IsOverload(FunctionDecl *New, FunctionDecl *Old,
   // SYCL
   //   Function overloading based on address space
   if(Context.getLangOpts().SYCLIsDevice &&
-     OldQType.getAddressSpace() != NewQType.getAddressSpace())
+     (OldQType.getAddressSpace() != NewQType.getAddressSpace()))
     return true;
 
   const FunctionProtoType *OldType = cast<FunctionProtoType>(OldQType);
@@ -5928,7 +5928,8 @@ Sema::AddOverloadCandidate(FunctionDecl *Function,
                            QualType DestTy,
                            bool SuppressUserConversions,
                            bool PartialOverloading,
-                           bool AllowExplicit) {
+                           bool AllowExplicit,
+                           ConversionSequenceList EarlyConversions) {
   const FunctionProtoType *Proto
     = dyn_cast<FunctionProtoType>(Function->getType()->getAs<FunctionType>());
   assert(Proto && "Functions without a prototype cannot be overloaded");
@@ -5947,7 +5948,7 @@ Sema::AddOverloadCandidate(FunctionDecl *Function,
       AddMethodCandidate(Method, FoundDecl, Method->getParent(),
                          DestTy, Expr::Classification::makeSimpleLValue(),
                          Args, CandidateSet, SuppressUserConversions,
-                         PartialOverloading);
+                         PartialOverloading, EarlyConversions);
       return;
     }
     // We treat a constructor like a non-member function, since its object
@@ -5977,16 +5978,25 @@ Sema::AddOverloadCandidate(FunctionDecl *Function,
     return;
 
   // Overload resolution is always an unevaluated context.
-  EnterExpressionEvaluationContext Unevaluated(*this, Sema::Unevaluated);
+  EnterExpressionEvaluationContext Unevaluated(
+      *this, Sema::ExpressionEvaluationContext::Unevaluated);
 
   // Add this candidate
-  OverloadCandidate &Candidate = CandidateSet.addCandidate(Args.size());
+  OverloadCandidate &Candidate =
+    CandidateSet.addCandidate(Args.size(), EarlyConversions);
   Candidate.FoundDecl = FoundDecl;
   Candidate.Function = Function;
   Candidate.Viable = true;
   Candidate.IsSurrogate = false;
   Candidate.IgnoreObjectArgument = false;
   Candidate.ExplicitCallArguments = Args.size();
+
+  if (Function->isMultiVersion() &&
+      !Function->getAttr<TargetAttr>()->isDefaultVersion()) {
+    Candidate.Viable = false;
+    Candidate.FailureKind = ovl_non_default_multiversion_function;
+    return;
+  }
 
   if (Constructor) {
     // C++ [class.copy]p3:
@@ -6002,6 +6012,28 @@ Sema::AddOverloadCandidate(FunctionDecl *Function,
       return;
     }
   }
+
+    // C++ [over.match.funcs]p8: (proposed DR resolution)
+    //   A constructor inherited from class type C that has a first parameter
+    //   of type "reference to P" (including such a constructor instantiated
+    //   from a template) is excluded from the set of candidate functions when
+    //   constructing an object of type cv D if the argument list has exactly
+    //   one argument and D is reference-related to P and P is reference-related
+    //   to C.
+    auto *Shadow = dyn_cast<ConstructorUsingShadowDecl>(FoundDecl.getDecl());
+    if (Shadow && Args.size() == 1 && Constructor->getNumParams() >= 1 &&
+        Constructor->getParamDecl(0)->getType()->isReferenceType()) {
+      QualType P = Constructor->getParamDecl(0)->getType()->getPointeeType();
+      QualType C = Context.getRecordType(Constructor->getParent());
+      QualType D = Context.getRecordType(Shadow->getParent());
+      SourceLocation Loc = Args.front()->getExprLoc();
+      if ((Context.hasSameUnqualifiedType(P, C) || IsDerivedFrom(Loc, P, C)) &&
+          (Context.hasSameUnqualifiedType(D, P) || IsDerivedFrom(Loc, D, P))) {
+        Candidate.Viable = false;
+        Candidate.FailureKind = ovl_fail_inhctor_slice;
+        return;
+      }
+    }
 
   unsigned NumParams = Proto->getNumParams();
 
@@ -6035,7 +6067,7 @@ Sema::AddOverloadCandidate(FunctionDecl *Function,
       // case we may not yet know what the member's target is; the target is
       // inferred for the member automatically, based on the bases and fields of
       // the class.
-      if (!Caller->isImplicit() && CheckCUDATarget(Caller, Function)) {
+      if (!Caller->isImplicit() && !IsAllowedCUDACall(Caller, Function)) {
         Candidate.Viable = false;
         Candidate.FailureKind = ovl_fail_bad_target;
         return;
@@ -6044,7 +6076,10 @@ Sema::AddOverloadCandidate(FunctionDecl *Function,
   // Determine the implicit conversion sequences for each of the
   // arguments.
   for (unsigned ArgIdx = 0; ArgIdx < Args.size(); ++ArgIdx) {
-    if (ArgIdx < NumParams) {
+    if (Candidate.Conversions[ArgIdx].isInitialized()) {
+      // We already formed a conversion sequence for this parameter during
+      // template argument deduction.
+    } else if (ArgIdx < NumParams) {
       // (C++ 13.3.2p3): for F to be a viable function, there shall
       // exist for each argument an implicit conversion sequence
       // (13.3.3.1) that converts that argument to the corresponding
@@ -6074,6 +6109,12 @@ Sema::AddOverloadCandidate(FunctionDecl *Function,
     Candidate.Viable = false;
     Candidate.FailureKind = ovl_fail_enable_if;
     Candidate.DeductionFailure.Data = FailedAttr;
+    return;
+  }
+
+  if (LangOpts.OpenCL && isOpenCLDisabledDecl(Function)) {
+    Candidate.Viable = false;
+    Candidate.FailureKind = ovl_fail_ext_disabled;
     return;
   }
 }
@@ -6590,7 +6631,8 @@ void Sema::AddFunctionCandidates(const UnresolvedSetImpl &Fns,
       } else {
         // Slice the first argument (which is the base) when we access
         // static method as non-static
-        if (Args.size() > 0 && (!Args[0] || (FirstArgumentIsBase && isa<CXXMethodDecl>(FD) &&
+        if (Args.size() > 0 && (!Args[0] || (FirstArgumentIsBase &&
+                                             isa<CXXMethodDecl>(FD) &&
                                              !isa<CXXConstructorDecl>(FD)))) {
           assert(cast<CXXMethodDecl>(FD)->isStatic());
           FunctionArgs = Args.slice(1);
@@ -6632,7 +6674,7 @@ void Sema::AddFunctionCandidates(const UnresolvedSetImpl &Fns,
           AddTemplateOverloadCandidate(FunTmpl, F.getPair(),
                                        ExplicitTemplateArgs, Args,
                                        CandidateSet, SuppressUserConversions,
-                                       PartialOverloading)
+                                       PartialOverloading);
       }
     }
   }
@@ -6902,19 +6944,34 @@ Sema::AddTemplateOverloadCandidate(FunctionTemplateDecl *FunctionTemplate,
   //   functions.
   TemplateDeductionInfo Info(CandidateSet.getLocation());
   FunctionDecl *Specialization = nullptr;
-  if (TemplateDeductionResult Result
-        = DeduceTemplateArguments(FunctionTemplate, ExplicitTemplateArgs, Args,
-                                  Specialization, Info, PartialOverloading)) {
-    OverloadCandidate &Candidate = CandidateSet.addCandidate();
+  ConversionSequenceList Conversions;
+  if (TemplateDeductionResult Result = DeduceTemplateArguments(
+          FunctionTemplate, ExplicitTemplateArgs, Args, Specialization, Info,
+          PartialOverloading, [&](ArrayRef<QualType> ParamTypes) {
+            return CheckNonDependentConversions(FunctionTemplate, ParamTypes,
+                                                Args, CandidateSet, Conversions,
+                                                SuppressUserConversions);
+        })) {
+    OverloadCandidate &Candidate =
+        CandidateSet.addCandidate(Conversions.size(), Conversions);
     Candidate.FoundDecl = FoundDecl;
     Candidate.Function = FunctionTemplate->getTemplatedDecl();
     Candidate.Viable = false;
     Candidate.FailureKind = ovl_fail_bad_deduction;
     Candidate.IsSurrogate = false;
-    Candidate.IgnoreObjectArgument = false;
+    // Ignore the object argument if there is one, since we don't have an object
+    // type.
+    Candidate.IgnoreObjectArgument =
+        isa<CXXMethodDecl>(Candidate.Function) &&
+        !isa<CXXConstructorDecl>(Candidate.Function);
     Candidate.ExplicitCallArguments = Args.size();
-    Candidate.DeductionFailure = MakeDeductionFailureInfo(Context, Result,
-                                                          Info);
+    if (Result == TDK_NonDependentConversionFailure)
+      Candidate.FailureKind = ovl_fail_bad_conversion;
+    else {
+      Candidate.FailureKind = ovl_fail_bad_deduction;
+      Candidate.DeductionFailure = MakeDeductionFailureInfo(Context, Result,
+                                                            Info);
+    }
     return;
   }
 
@@ -6922,7 +6979,10 @@ Sema::AddTemplateOverloadCandidate(FunctionTemplateDecl *FunctionTemplate,
   // deduction as a candidate.
   assert(Specialization && "Missing function template specialization?");
   AddOverloadCandidate(Specialization, FoundDecl, Args, CandidateSet,
-                       ObjectType, SuppressUserConversions, PartialOverloading);
+                       ObjectType,
+                       SuppressUserConversions, PartialOverloading,
+                       /*AllowExplicit*/false, Conversions);
+
 }
 
 /// \brief Add a C++ function template specialization as a candidate
@@ -9329,8 +9389,8 @@ bool clang::isBetterOverloadCandidate(
   //   candidate
   if (S.getASTContext().getLangOpts().SYCLIsDevice &&
       Cand1.Function && Cand2.Function) {
-    unsigned int candAS1 = Cand1.Function->getType().getAddressSpace();
-    unsigned int candAS2 = Cand2.Function->getType().getAddressSpace();
+    unsigned int candAS1 = toTargetAddressSpace(Cand1.Function->getType().getAddressSpace());
+    unsigned int candAS2 = toTargetAddressSpace(Cand2.Function->getType().getAddressSpace());
     if (candAS2 == 0 && (candAS1 != 4 || candAS1 == 0))
       return true;
   }

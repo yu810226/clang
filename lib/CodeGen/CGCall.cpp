@@ -71,7 +71,7 @@ unsigned CodeGenTypes::ClangCallConvToLLVMCallConv(CallingConv CC) {
 /// qualification.
 /// FIXME: address space qualification?
 static CanQualType GetThisType(ASTContext &Context, const CXXRecordDecl *RD,
-                               unsigned int addressSpace) {
+                               LangAS addressSpace) {
   QualType RecTy = Context.getTagDeclType(RD)->getCanonicalTypeInternal();
   if (Context.getLangOpts().SYCLIsDevice)
     RecTy = Context.getAddrSpaceQualType(RecTy, addressSpace);
@@ -253,7 +253,7 @@ const CGFunctionInfo &
 CodeGenTypes::arrangeCXXMethodType(const CXXRecordDecl *RD,
                                    const FunctionProtoType *FTP,
                                    const CXXMethodDecl *MD,
-                                   unsigned int addressSpace) {
+                                   LangAS addressSpace) {
   SmallVector<CanQualType, 16> argTypes;
 
   // Add the 'this' pointer.
